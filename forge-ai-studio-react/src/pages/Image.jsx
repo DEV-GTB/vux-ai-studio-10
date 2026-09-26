@@ -77,13 +77,45 @@ export function Image({ setCurrentPage: _setCurrentPage, username: _username }) 
     setErrorMessage('')
 
     try {
-      const imageData = createLocalPreview()
+      // Simulate progress
+      const progressInterval = setInterval(() => {
+        setProgress(prev => {
+          if (prev >= 90) {
+            clearInterval(progressInterval)
+            return 90
+          }
+          return prev + 10
+        })
+      }, 200)
+
+      const response = await fetch('/api/image', {
+        method: 'POST',
+        headers: {
+          'Content-Type': 'application/json',
+        },
+        body: JSON.stringify({
+          prompt,
+          aspectRatio,
+          quality,
+          stylePreset,
+        }),
+      })
+
+      clearInterval(progressInterval)
+
+      if (!response.ok) {
+        const errorData = await response.json()
+        console.error('Image generation error:', errorData)
+        throw new Error(errorData.error || errorData.details || 'Failed to generate image')
+      }
+
+      const data = await response.json()
       setProgress(100)
-      setGeneratedImage(imageData)
+      setGeneratedImage(data.image)
 
       const newImage = {
         id: Date.now(),
-        data: imageData,
+        data: data.image,
         prompt,
         timestamp: new Date().toLocaleString(),
         aspectRatio,
@@ -139,7 +171,7 @@ export function Image({ setCurrentPage: _setCurrentPage, username: _username }) 
             <span className="text-xl wave-animation">🎨</span>
           </div>
           <h1 className="text-2xl font-display font-bold text-white">
-            Local Image Workspace
+            FLUX.1 Image Generator
           </h1>
         </div>
         <div className="flex items-center gap-2 lg:gap-4">
@@ -265,7 +297,7 @@ export function Image({ setCurrentPage: _setCurrentPage, username: _username }) 
                     </>
                   ) : (
                     <>
-                      <span className="wave-animation">✨</span> Create Local Preview
+                      <span className="wave-animation">✨</span> Generate Image
                     </>
                   )}
                 </button>
@@ -304,7 +336,7 @@ export function Image({ setCurrentPage: _setCurrentPage, username: _username }) 
 
                 <div className="relative z-10">
                   <div className="flex items-center justify-between mb-4">
-                    <h2 className="text-lg font-display font-semibold">LOCAL PREVIEW</h2>
+                    <h2 className="text-lg font-display font-semibold">GENERATED IMAGE</h2>
                     <div className="flex items-center gap-2">
                       <button
                         onClick={() => downloadImage(generatedImage)}
@@ -515,8 +547,8 @@ export function Image({ setCurrentPage: _setCurrentPage, username: _username }) 
                   <span className="font-semibold">{imageHistory.length}</span>
                 </div>
                 <div className="flex justify-between items-center">
-                  <span className="text-sm text-forge-textMuted">Mode</span>
-                  <span className="font-semibold text-xs">Browser-only preview</span>
+                  <span className="text-sm text-forge-textMuted">Model</span>
+                  <span className="font-semibold text-xs">FLUX.1-schnell</span>
                 </div>
                 <div className="flex justify-between items-center">
                   <span className="text-sm text-forge-textMuted">Quality</span>

@@ -12,11 +12,51 @@ const dailyInsights = [
 
 export function Home({ setCurrentPage, username }) {
   const [projects] = useState([
-    { name: 'Game Theory Building Engine', type: 'Python Project', icon: '🐍', status: 'Active', edited: '2 hours ago', color: 'primary' },
-    { name: 'AI Assistant', type: 'TypeScript Project', icon: '🤖', status: 'Building', edited: 'Yesterday', color: 'ai' },
-    { name: 'Skyfall Game', type: 'C++ Project', icon: '🎮', status: 'Active', edited: '3 days ago', color: 'success' },
-    { name: 'Portfolio Site', type: 'Web Project', icon: '🌐', status: 'Active', edited: '1 week ago', color: 'tech' },
+    { name: 'Game Theory Building Engine', type: 'Python Project', icon: '🐍', status: 'Active', edited: '2 hours ago', color: 'primary', health: 'healthy' },
+    { name: 'AI Assistant', type: 'TypeScript Project', icon: '🤖', status: 'Building', edited: 'Yesterday', color: 'ai', health: 'warning' },
+    { name: 'Skyfall Game', type: 'C++ Project', icon: '🎮', status: 'Active', edited: '3 days ago', color: 'success', health: 'healthy' },
+    { name: 'Portfolio Site', type: 'Web Project', icon: '🌐', status: 'Active', edited: '1 week ago', color: 'tech', health: 'healthy' },
   ])
+
+  const [showNewProjectModal, setShowNewProjectModal] = useState(false)
+
+  const getNextSteps = (project) => {
+    const steps = []
+    
+    if (project.health === 'warning') {
+      steps.push({ text: 'Fix detected warnings', priority: 'high', icon: '🔧' })
+    }
+    
+    if (project.status === 'Building') {
+      steps.push({ text: 'Complete build process', priority: 'high', icon: '🔨' })
+    }
+    
+    if (project.type.includes('React') || project.type.includes('Web')) {
+      steps.push({ text: 'Add responsive design', priority: 'medium', icon: '📱' })
+      steps.push({ text: 'Optimize performance', priority: 'medium', icon: '⚡' })
+    }
+    
+    if (project.type.includes('Python')) {
+      steps.push({ text: 'Add unit tests', priority: 'medium', icon: '🧪' })
+      steps.push({ text: 'Set up virtual environment', priority: 'low', icon: '🐍' })
+    }
+    
+    steps.push({ text: 'Create production build', priority: 'low', icon: '🚀' })
+    steps.push({ text: 'Deploy to hosting', priority: 'low', icon: '🌐' })
+    
+    return steps.slice(0, 4) // Show top 4 suggestions
+  }
+
+  const projectTemplates = [
+    { name: 'Website', icon: '🌐', description: 'Modern website with HTML, CSS, JS', type: 'web' },
+    { name: 'React', icon: '⚛️', description: 'React application with Vite', type: 'react' },
+    { name: 'Web App', icon: '📱', description: 'Progressive web application', type: 'pwa' },
+    { name: 'Python', icon: '🐍', description: 'Python backend or script', type: 'python' },
+    { name: 'Node.js', icon: '💚', description: 'Node.js server application', type: 'node' },
+    { name: 'AI Project', icon: '🤖', description: 'AI-powered application', type: 'ai' },
+    { name: 'Game', icon: '🎮', description: 'Game development project', type: 'game' },
+    { name: 'Empty Project', icon: '📦', description: 'Start from scratch', type: 'empty' },
+  ]
 
   const [currentInsightIndex, setCurrentInsightIndex] = useState(0)
   const [displayedInsight, setDisplayedInsight] = useState('')
@@ -169,7 +209,10 @@ status: "Creating magic..."`
               Build, iterate and ship extraordinary with the power of Vux AI Studio.
             </p>
             <div className="flex flex-col sm:flex-row gap-3 lg:gap-4 mb-6">
-              <button className="px-6 py-3 bg-forge-primary text-black font-semibold rounded-lg hover:bg-forge-primaryHover transition-all">
+              <button 
+                onClick={() => setShowNewProjectModal(true)}
+                className="px-6 py-3 bg-forge-primary text-black font-semibold rounded-lg hover:bg-forge-primaryHover transition-all"
+              >
                 New Project
               </button>
               <button className="px-6 py-3 bg-forge-surfaceLow border border-forge-border text-white rounded-lg hover:bg-forge-surfaceHigh transition-all">
@@ -248,9 +291,12 @@ status: "Creating magic..."`
                       <div className={`w-10 h-10 rounded-lg bg-forge-${project.color}Light flex items-center justify-center text-xl`}>
                         {project.icon}
                       </div>
-                      <button className="opacity-0 group-hover:opacity-100 transition-opacity text-forge-textMuted hover:text-forge-text">
-                        ⋯
-                      </button>
+                      <div className="flex items-center gap-2">
+                        <span className={`w-2 h-2 rounded-full ${project.health === 'healthy' ? 'bg-green-500' : project.health === 'warning' ? 'bg-yellow-500' : 'bg-red-500'}`}></span>
+                        <button className="opacity-0 group-hover:opacity-100 transition-opacity text-forge-textMuted hover:text-forge-text">
+                          ⋯
+                        </button>
+                      </div>
                     </div>
                     <div className="font-semibold text-sm mb-1">{project.name}</div>
                     <div className="text-xs text-forge-textMuted mb-2">{project.type}</div>
@@ -258,6 +304,19 @@ status: "Creating magic..."`
                       <div className={`h-full bg-forge-${project.color} rounded-full progress-grow`} style={{ width: project.status === 'Active' ? '100%' : '60%' }}></div>
                     </div>
                     <div className="text-xs text-forge-textMuted mt-2">Edited {project.edited}</div>
+                    
+                    {/* Next Steps Suggestions */}
+                    <div className="mt-3 pt-3 border-t border-forge-border">
+                      <div className="text-xs text-forge-textMuted mb-2">Suggested next steps:</div>
+                      <div className="space-y-1">
+                        {getNextSteps(project).slice(0, 2).map((step, stepIndex) => (
+                          <div key={stepIndex} className="flex items-center gap-1 text-xs text-forge-textMuted">
+                            <span>{step.icon}</span>
+                            <span className="truncate">{step.text}</span>
+                          </div>
+                        ))}
+                      </div>
+                    </div>
                   </div>
                 ))}
               </div>
@@ -381,6 +440,52 @@ status: "Creating magic..."`
           </div>
         </div>
       </div>
+
+      {/* New Project Modal */}
+      {showNewProjectModal && (
+        <div className="fixed inset-0 bg-black/60 backdrop-blur-sm z-50 flex items-center justify-center p-4">
+          <div className="bg-forge-surface border border-forge-border rounded-2xl p-6 max-w-4xl w-full max-h-[80vh] overflow-auto">
+            <div className="flex items-center justify-between mb-6">
+              <h2 className="text-2xl font-display font-bold">Create New Project</h2>
+              <button 
+                onClick={() => setShowNewProjectModal(false)}
+                className="w-8 h-8 rounded-lg bg-forge-surfaceLow border border-forge-border flex items-center justify-center hover:bg-forge-surfaceHigh"
+              >
+                ×
+              </button>
+            </div>
+
+            <div className="grid grid-cols-2 md:grid-cols-4 gap-4">
+              {projectTemplates.map((template) => (
+                <button
+                  key={template.type}
+                  onClick={() => {
+                    setShowNewProjectModal(false)
+                    setCurrentPage('studio')
+                  }}
+                  className="p-4 bg-forge-surfaceLow border border-forge-border rounded-xl hover:border-forge-primary/50 transition-all group"
+                >
+                  <div className="text-3xl mb-2 group-hover:scale-110 transition-transform">{template.icon}</div>
+                  <div className="font-semibold text-sm mb-1">{template.name}</div>
+                  <div className="text-xs text-forge-textMuted">{template.description}</div>
+                </button>
+              ))}
+            </div>
+
+            <div className="mt-6 pt-6 border-t border-forge-border">
+              <div className="text-sm text-forge-textMuted mb-4">Or choose from your recent templates</div>
+              <div className="flex gap-3">
+                <button className="px-4 py-2 bg-forge-surfaceLow border border-forge-border rounded-lg text-sm hover:bg-forge-surfaceHigh">
+                  Import from GitHub
+                </button>
+                <button className="px-4 py-2 bg-forge-surfaceLow border border-forge-border rounded-lg text-sm hover:bg-forge-surfaceHigh">
+                  Open Local Folder
+                </button>
+              </div>
+            </div>
+          </div>
+        </div>
+      )}
 
       {/* System Status Bar */}
       <footer className="hidden lg:flex fixed bottom-0 left-0 lg:left-64 right-0 bg-forge-surface border-t border-forge-border px-4 lg:px-8 py-3 items-center justify-between text-xs text-forge-textMuted">

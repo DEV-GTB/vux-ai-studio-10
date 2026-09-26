@@ -1,11 +1,12 @@
 import { useState, useEffect } from 'react'
-import { Landing, Home, Chat, Studio, Image, Settings, Help, Username, Terms } from './pages'
+import { Landing, Home, HomeController, Chat, Studio, Image, Object3D, Settings, Help, Username, Terms } from './pages'
 import './index.css'
 
 function App() {
   const [currentPage, setCurrentPage] = useState(() => {
     if (window.location.pathname === '/login') return 'username'
     if (window.location.pathname === '/terms') return 'terms'
+    if (window.location.pathname === '/home-controller') return 'home-controller'
     return localStorage.getItem('vux_onboarded') ? 'home' : 'landing'
   })
   const [username, _setUsername] = useState(localStorage.getItem('vux_username') || 'Developer')
@@ -43,9 +44,11 @@ function App() {
 
     switch(currentPage) {
       case 'home': return <Home setCurrentPage={setCurrentPage} username={username} />
+      case 'home-controller': return <HomeController setCurrentPage={setCurrentPage} />
       case 'chat': return <Chat setCurrentPage={setCurrentPage} username={username} />
-      case 'studio': return <Studio setCurrentPage={setCurrentPage} username={username} />
+      case 'studio': return <Studio username={username} />
       case 'image': return <Image setCurrentPage={setCurrentPage} username={username} />
+      case 'object3d': return <Object3D setCurrentPage={setCurrentPage} username={username} />
       case 'settings': return <Settings setCurrentPage={setCurrentPage} username={username} />
       case 'help': return <Help setCurrentPage={setCurrentPage} username={username} />
       case 'terms': return <Terms onBack={() => { setCurrentPage('home'); window.history.pushState({}, '', '/') }} />
@@ -113,6 +116,18 @@ function App() {
             {!sidebarCollapsed && <span className="font-medium">Chat</span>}
           </button>
           <button
+            onClick={() => { setCurrentPage('home-controller'); window.history.pushState({}, '', '/home-controller'); setMobileMenuOpen(false); }}
+            className={`flex items-center gap-3 px-4 py-3 rounded-lg transition-all ${
+              currentPage === 'home-controller'
+                ? 'bg-forge-techLight text-forge-tech border-l-2 border-forge-tech'
+                : 'text-forge-textMuted hover:bg-forge-surfaceLow'
+            }`}
+            title="Home Controller"
+          >
+            <span className="text-xl flex-shrink-0">⌁</span>
+            {!sidebarCollapsed && <span className="font-medium">Home Controller</span>}
+          </button>
+          <button
             onClick={() => { setCurrentPage('studio'); setMobileMenuOpen(false); }}
             className={`flex items-center gap-3 px-4 py-3 rounded-lg transition-all ${
               currentPage === 'studio' 
@@ -135,6 +150,18 @@ function App() {
           >
             <span className="text-xl flex-shrink-0">🎨</span>
             {!sidebarCollapsed && <span className="font-medium">Image Generator</span>}
+          </button>
+          <button
+            onClick={() => { setCurrentPage('object3d'); setMobileMenuOpen(false); }}
+            className={`flex items-center gap-3 px-4 py-3 rounded-lg transition-all ${
+              currentPage === 'object3d' 
+                ? 'bg-forge-techLight text-forge-tech border-l-2 border-forge-tech' 
+                : 'text-forge-textMuted hover:bg-forge-surfaceLow'
+            }`}
+            title="3D Objects"
+          >
+            <span className="text-xl flex-shrink-0">🎲</span>
+            {!sidebarCollapsed && <span className="font-medium">3D Objects</span>}
           </button>
           <button
             onClick={() => { setCurrentPage('settings'); setMobileMenuOpen(false); }}
