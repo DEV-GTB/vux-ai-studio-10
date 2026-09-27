@@ -35,6 +35,8 @@ test('device status is authenticated, cached in memory, and normalized for the d
     room1Light: false,
     room2Fan: false,
     room2Light: true,
+    wifiConnected: true,
+    localApConnected: true,
     systemCurrent: 0.7,
     room1Sensor: 0,
     room2Sensor: 1,
@@ -56,6 +58,8 @@ test('device status is authenticated, cached in memory, and normalized for the d
   assert.equal(result.device.rooms.length, 2);
   assert.equal(result.device.rooms[0].fanOn, true);
   assert.equal(result.device.rooms[1].lightOn, true);
+  assert.equal(result.device.wifi.stationConnected, true);
+  assert.equal(result.device.wifi.localApConnected, true);
   assert.equal(result.device.telemetry.system.current, 0.7);
   assert.equal(result.device.telemetry.system.voltage, null);
 });

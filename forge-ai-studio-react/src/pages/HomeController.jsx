@@ -174,7 +174,12 @@ export function HomeController({ setCurrentPage }) {
     : undefined
   const protection = device?.protection?.state || 'UNKNOWN'
   const uptime = Number.isFinite(Number(device?.uptime)) ? Math.floor(Number(device.uptime)) : null
-  const wifiValue = device?.wifi?.connected ? 'ACCESS POINT ONLINE' : 'ACCESS POINT OFFLINE'
+  const localApValue = device?.wifi?.localApConnected === true
+    ? 'LOCAL NETWORK ONLINE'
+    : device?.wifi?.localApConnected === false
+      ? 'LOCAL NETWORK OFFLINE'
+      : 'NOT REPORTED'
+  const uplinkValue = device?.wifi?.stationConnected === true ? 'INTERNET UPLINK ONLINE' : 'NO CLOUD UPLINK'
   const backendValue = device?.backendConnected === true
     ? 'CLOUD LINK ONLINE'
     : device?.backendConnected === false
@@ -435,7 +440,8 @@ export function HomeController({ setCurrentPage }) {
                 </div>
                 <div className="hc-link-list">
                   <LinkSignal label="ESP32 HTTP" value={connection} state={connection === 'LIVE' ? 'online' : ''} />
-                  <LinkSignal label="ESP32 access point" value={wifiValue} state={device?.wifi?.connected ? 'online' : ''} />
+                  <LinkSignal label="NEXUS local Wi-Fi" value={localApValue} state={device?.wifi?.localApConnected === true ? 'online' : ''} />
+                  <LinkSignal label="Phone hotspot uplink" value={uplinkValue} state={device?.wifi?.stationConnected ? 'online' : ''} />
                   <LinkSignal label="Cloud backend" value={backendValue} state={device?.backendConnected === true ? 'online' : ''} />
                 </div>
                 <div className="hc-link-footer"><span>Last device timestamp</span><strong>{device?.telemetry?.timestamp ? new Date(getTimestampMs(device.telemetry.timestamp) || 0).toLocaleTimeString() : 'NOT REPORTED'}</strong></div>

@@ -40,6 +40,7 @@ function makeDashboardPayload(payload) {
     ? DEVICE_STATES[payload.state] || 'UNKNOWN'
     : String(payload.state || 'UNKNOWN').toUpperCase();
   const current = Number.isFinite(payload.systemCurrent) ? payload.systemCurrent : null;
+  const stationConnected = payload.wifiConnected === undefined ? true : payload.wifiConnected === true;
   const rooms = [1, 2].map((roomId) => {
     const fanOn = payload[`room${roomId}Fan`] === true;
     const lightOn = payload[`room${roomId}Light`] === true;
@@ -62,7 +63,12 @@ function makeDashboardPayload(payload) {
     name: 'NEXUS ESP32 Home Controller',
     firmwareVersion: payload.firmwareVersion || 'UNREPORTED',
     status: 'ONLINE',
-    wifi: { connected: true, rssi: payload.wifiRSSI ?? null },
+    wifi: {
+      connected: stationConnected,
+      stationConnected,
+      localApConnected: payload.localApConnected ?? null,
+      rssi: payload.wifiRSSI ?? null,
+    },
     backendConnected: true,
     protection: { state: state },
     telemetry: {
@@ -101,6 +107,7 @@ router.get('/state', (req, res) => {
 
 router.post('/status', async (req, res) => {
   if (!isAuthorized(req)) {
+    console.warn('[device] rejected status upload: invalid device token');
     return res.status(401).json({ error: 'DEVICE_UNAUTHORIZED' });
   }
 
@@ -112,6 +119,7 @@ router.post('/status', async (req, res) => {
     return res.status(413).json({ error: 'DEVICE_STATUS_TOO_LARGE' });
   }
   if (payload.deviceId !== configuredDeviceId()) {
+    console.warn('[device] rejected status upload: device ID mismatch');
     return res.status(403).json({ error: 'DEVICE_ID_NOT_ALLOWED' });
   }
   if (![1, 2].every((roomId) => (
@@ -128,6 +136,7 @@ router.post('/status', async (req, res) => {
     payload,
     receivedAt: new Date().toISOString(),
   };
+  console.info(`[device] status accepted: ${configuredDeviceId()}, state ${payload.state ?? 'unknown'}`);
   return res.status(202).json({ accepted: true });
 });
 
@@ -162,17 +171,22 @@ router.post('/command', (req, res) => {
 
   const queuedCommand = { command, room };
   pendingCommands.push(queuedCommand);
+  console.info(`[device] dashboard command queued: room ${room}, ${command}`);
   return res.status(202).json({ accepted: true, command: queuedCommand });
 });
 
 router.get('/poll', (req, res) => {
   if (!isAuthorized(req)) {
+    console.warn('[device] rejected command poll: invalid device token');
     return res.status(401).json({ error: 'DEVICE_UNAUTHORIZED' });
   }
   if (req.query.deviceId !== configuredDeviceId()) {
+    console.warn('[device] rejected command poll: device ID mismatch');
     return res.status(403).json({ error: 'DEVICE_ID_NOT_ALLOWED' });
   }
-  return res.json({ command: pendingCommands.shift() || null });
+  const command = pendingCommands.shift() || null;
+  if (command) console.info(`[device] command delivered: room ${command.room}, ${command.command}`);
+  return res.json({ command });
 });
 
 export default router;

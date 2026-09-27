@@ -1,6 +1,7 @@
 .env
 .env.*
 !.env.example
+esp32/nexus_hybrid_control/nexus_secrets.h
 node_modules/
 forge-ai-studio-react/node_modules/
 forge-ai-studio-react/dist/

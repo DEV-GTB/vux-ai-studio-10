@@ -48,6 +48,10 @@ The browser sends API requests to the configured backend URL. Provider API keys 
 
 ## ESP32 Home Controller
 
+For direct, nearby phone-to-ESP32 control with no backend, use the separate [local ESP32 control sketch](esp32/nexus_local_control/nexus_local_control.ino) and follow [ESP32_LOCAL_CONTROL.md](ESP32_LOCAL_CONTROL.md). This runs its own local page at `http://192.168.4.1/`; it is separate from the cloud Render/Vercel controller.
+
+For local Wi-Fi control plus optional Render telemetry/website commands in one firmware, use [the hybrid ESP32 sketch](esp32/nexus_hybrid_control/nexus_hybrid_control.ino) and follow [ESP32_HYBRID_SETUP.md](ESP32_HYBRID_SETUP.md). Copy `nexus_secrets.example.h` to the ignored `nexus_secrets.h` and put real device/network credentials only in that local file. The AI remains in the Vercel/Render website backend; the ESP32 only relays telemetry and device commands.
+
 For the beginner setup that connects an ESP32 through a phone hotspot to Render, including two-room fan/light controls, follow [ESP32_CLOUD_SETUP.md](ESP32_CLOUD_SETUP.md). The cloud bridge keeps the latest snapshot and pending commands in memory; local device protection remains authoritative.
 
 For a local-only device link, the Home Controller can use `/api/v1/iot/esp32/status`; the Node server polls the firmware's `/api/telemetry` endpoint and optionally `/api/diag` on the same reachable LAN. For cloud telemetry over a phone hotspot, use the authenticated `/api/device/status` upload and `/api/device/state` dashboard endpoints described in [ESP32_CLOUD_SETUP.md](ESP32_CLOUD_SETUP.md). The browser never contacts the ESP32 directly.
