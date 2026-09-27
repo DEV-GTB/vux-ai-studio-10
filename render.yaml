@@ -3,7 +3,7 @@ services:
     name: vux-ai-studio
     env: node
     plan: free
-    buildCommand: npm install
+    buildCommand: npm install && npm run build
     startCommand: npm start
     envVars:
       - key: NODE_ENV
@@ -12,6 +12,12 @@ services:
         value: 3000
       - key: GEMINI_API_KEY
         sync: false
+      - key: HF_TOKEN
+        sync: false
+      - key: NEXUS_DEVICE_TOKEN
+        sync: false
+      - key: NEXUS_DEVICE_ID
+        value: NEXUS-001
       - key: GEMINI_MODEL
         value: gemini-2.5-flash
       - key: GEMINI_IMAGE_MODEL

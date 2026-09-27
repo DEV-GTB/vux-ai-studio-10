@@ -1,4 +1,5 @@
 import { useState, useEffect, useRef } from 'react'
+import { apiUrl } from '../lib/api.js'
 
 export function Chat({ setCurrentPage: _setCurrentPage, username }) {
   const [messages, setMessages] = useState([
@@ -63,7 +64,7 @@ export function Chat({ setCurrentPage: _setCurrentPage, username }) {
     setStreamingMessage('')
 
     try {
-      const response = await fetch('/api/chat', {
+      const response = await fetch(apiUrl('/api/chat'), {
         method: 'POST',
         headers: { 'Content-Type': 'application/json' },
         body: JSON.stringify({
