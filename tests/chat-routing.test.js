@@ -17,6 +17,9 @@ const nativeFetch = globalThis.fetch;
 const originalEnvironment = {
   HF_TOKEN: process.env.HF_TOKEN,
   GEMINI_API_KEY: process.env.GEMINI_API_KEY,
+  GEMINI_MODEL: process.env.GEMINI_MODEL,
+  DEEPSEEK_API_KEY: process.env.DEEPSEEK_API_KEY,
+  DEEPSEEK_MODEL: process.env.DEEPSEEK_MODEL,
   HF_CHAT_MODEL: process.env.HF_CHAT_MODEL,
   HF_DEEPSEEK_MODEL: process.env.HF_DEEPSEEK_MODEL,
   HF_VISION_MODEL: process.env.HF_VISION_MODEL,
@@ -39,6 +42,9 @@ afterEach(() => {
 beforeEach(() => {
   process.env.HF_TOKEN = 'test-huggingface-token';
   process.env.GEMINI_API_KEY = '';
+  process.env.GEMINI_MODEL = 'gemma-4-31b-it';
+  process.env.DEEPSEEK_API_KEY = '';
+  process.env.DEEPSEEK_MODEL = 'deepseek-chat';
   process.env.HF_CHAT_MODEL = 'google/gemma-test';
   process.env.HF_DEEPSEEK_MODEL = 'deepseek-ai/deepseek-test';
   delete process.env.HF_VISION_MODEL;
@@ -90,7 +96,59 @@ test('coding requests prefer the configured DeepSeek route', async () => {
   assert.equal(requestedModel, 'deepseek-ai/deepseek-test');
 });
 
-test('Gemini is used if both Hugging Face routes fail', async () => {
+test('coding requests prefer the configured DeepSeek API key', async () => {
+  process.env.DEEPSEEK_API_KEY = 'test-deepseek-key';
+  let requestedUrl = '';
+  let requestBody;
+  globalThis.fetch = async (url, options) => {
+    requestedUrl = String(url);
+    assert.equal(options.headers.Authorization, 'Bearer test-deepseek-key');
+    requestBody = JSON.parse(options.body);
+    return jsonResponse({ choices: [{ message: { content: 'Direct DeepSeek answer.' } }] });
+  };
+
+  const response = await ask([{ role: 'user', content: 'Debug this JavaScript function.' }]);
+  assert.equal(response.status, 200);
+  assert.equal((await response.json()).text, 'Direct DeepSeek answer.');
+  assert.equal(requestedUrl, 'https://api.deepseek.com/chat/completions');
+  assert.equal(requestBody.model, 'deepseek-chat');
+});
+
+test('Gemma is used for ordinary chat without a systemInstruction field', async () => {
+  process.env.GEMINI_API_KEY = 'test-gemini-key';
+  let requestedUrl = '';
+  let requestBody;
+  globalThis.fetch = async (url, options) => {
+    requestedUrl = String(url);
+    requestBody = JSON.parse(options.body);
+    return jsonResponse({ candidates: [{ content: { parts: [{ text: 'Gemma answer.' }] } }] });
+  };
+
+  const response = await ask([{ role: 'user', content: 'What is a closure?' }]);
+  assert.equal(response.status, 200);
+  assert.equal((await response.json()).text, 'Gemma answer.');
+  assert.match(requestedUrl, /models\/gemma-4-31b-it:/);
+  assert.equal(requestBody.systemInstruction, undefined);
+  assert.match(requestBody.contents[0].parts[0].text, /Vux AI Studio/);
+});
+
+test('Gemini retries with its fallback model after a transient Gemma error', async () => {
+  process.env.GEMINI_API_KEY = 'test-gemini-key';
+  const requestedUrls = [];
+  globalThis.fetch = async (url) => {
+    requestedUrls.push(String(url));
+    if (String(url).includes('/gemma-4-31b-it:')) return jsonResponse({ error: { message: 'temporarily unavailable' } }, 503);
+    return jsonResponse({ candidates: [{ content: { parts: [{ text: 'Fallback answer.' }] } }] });
+  };
+
+  const response = await ask([{ role: 'user', content: 'What is a closure?' }]);
+  assert.equal(response.status, 200);
+  assert.equal((await response.json()).text, 'Fallback answer.');
+  assert.match(requestedUrls[0], /models\/gemma-4-31b-it:/);
+  assert.match(requestedUrls[1], /models\/gemini-3.6-flash:/);
+});
+
+test('Gemini falls back after both Hugging Face routes fail for coding requests', async () => {
   process.env.GEMINI_API_KEY = 'test-gemini-key';
   const requestedUrls = [];
   globalThis.fetch = async (url) => {
@@ -99,7 +157,7 @@ test('Gemini is used if both Hugging Face routes fail', async () => {
     return jsonResponse({ candidates: [{ content: { parts: [{ text: 'Fallback answer.' }] } }] });
   };
 
-  const response = await ask([{ role: 'user', content: 'What is a closure?' }]);
+  const response = await ask([{ role: 'user', content: 'Debug this JavaScript function.' }]);
   assert.equal(response.status, 200);
   assert.equal((await response.json()).text, 'Fallback answer.');
   assert.equal(requestedUrls.filter((url) => url.includes('router.huggingface.co')).length, 2);

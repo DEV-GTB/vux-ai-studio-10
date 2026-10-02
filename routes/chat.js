@@ -119,24 +119,58 @@ async function callHuggingFace(messages, model) {
   return text;
 }
 
+async function callDeepSeek(messages) {
+  const response = await fetch('https://api.deepseek.com/chat/completions', {
+    method: 'POST',
+    headers: {
+      Authorization: `Bearer ${process.env.DEEPSEEK_API_KEY}`,
+      'Content-Type': 'application/json',
+    },
+    body: JSON.stringify({
+      model: process.env.DEEPSEEK_MODEL || 'deepseek-chat',
+      messages,
+      stream: false,
+    }),
+  });
+  const body = await response.text();
+  let data = {};
+  try { data = body ? JSON.parse(body) : {}; } catch { data = {}; }
+
+  if (!response.ok) {
+    const error = new Error(data?.error?.message || 'Chat request failed');
+    error.status = response.status;
+    throw error;
+  }
+
+  const text = extractAssistantText(data);
+  if (!text) throw new Error('The chat service returned an empty response.');
+  return text;
+}
+
 async function callGemini(messages) {
-  const contents = messages.slice(1).map((message) => ({
-    role: message.role === 'assistant' ? 'model' : 'user',
-    parts: toGeminiParts(message.content),
-  }));
-  const configuredModel = process.env.GEMINI_MODEL || 'gemini-3.6-flash';
+  const configuredModel = process.env.GEMINI_MODEL || 'gemma-4-31b-it';
   const models = [...new Set([configuredModel, 'gemini-3.6-flash'])];
   let data = {};
   let response;
 
   for (const model of models) {
+    const isGemma = model.toLowerCase().startsWith('gemma-');
+    const contents = messages.slice(1).map((message) => ({
+      role: message.role === 'assistant' ? 'model' : 'user',
+      parts: toGeminiParts(message.content),
+    }));
+    const systemPrompt = messages[0]?.content || `${IDENTITY_PROMPT}\n\n${FORCE_ENGLISH_INSTRUCTIONS}`;
+    if (isGemma && contents[0]?.role === 'user') {
+      contents[0].parts.unshift({ text: systemPrompt });
+    }
+
     response = await fetch(
       `https://generativelanguage.googleapis.com/v1beta/models/${model}:generateContent?key=${process.env.GEMINI_API_KEY}`,
       {
         method: 'POST',
         headers: { 'Content-Type': 'application/json' },
         body: JSON.stringify({
-          systemInstruction: { parts: [{ text: messages[0]?.content || `${IDENTITY_PROMPT}\n\n${FORCE_ENGLISH_INSTRUCTIONS}` }] },
+          ...(!isGemma ? { systemInstruction: { parts: [{ text: systemPrompt }] } } : {}),
           contents,
         }),
       }
@@ -144,7 +178,7 @@ async function callGemini(messages) {
 
     const responseText = await response.text();
     try { data = responseText ? JSON.parse(responseText) : {}; } catch { data = {}; }
-    if (response.ok || response.status !== 404) break;
+    if (response.ok || (response.status !== 404 && response.status !== 429 && response.status < 500)) break;
   }
 
   if (!response?.ok) {
@@ -177,6 +211,7 @@ router.post('/', async (req, res) => {
   const isCoding = looksLikeCodingRequest(latestUserMessage?.content || '');
   const hasHuggingFace = Boolean(process.env.HF_TOKEN && process.env.HF_TOKEN !== 'your_huggingface_api_key_here');
   const hasGemini = Boolean(process.env.GEMINI_API_KEY && process.env.GEMINI_API_KEY !== 'your_gemini_api_key_here');
+  const hasDeepSeek = Boolean(process.env.DEEPSEEK_API_KEY && process.env.DEEPSEEK_API_KEY !== 'your_deepseek_api_key_here');
   const systemMessage = normalizedMessages[0];
   const userMessages = normalizedMessages.slice(1);
   const chatModel = process.env.HF_CHAT_MODEL || 'google/gemma-4-12B-it';
@@ -186,6 +221,26 @@ router.post('/', async (req, res) => {
     : [...new Set([chatModel, deepSeekModel])];
 
   let lastError = null;
+  if (isCoding && hasDeepSeek) {
+    try {
+      const text = await callDeepSeek(normalizedMessages);
+      return res.json({ text: scrubIdentity(text) });
+    } catch (error) {
+      lastError = error;
+      console.warn('[chat] DeepSeek route failed; trying the next configured service.');
+    }
+  }
+
+  if (!isCoding && hasGemini) {
+    try {
+      const text = await callGemini(normalizedMessages);
+      return res.json({ text: scrubIdentity(text) });
+    } catch (error) {
+      lastError = error;
+      console.warn('[chat] Gemini route failed; trying the next configured service:', error?.status || 'provider-error');
+    }
+  }
+
   if (hasHuggingFace) {
     for (const model of huggingFaceModels) {
       try {
@@ -198,7 +253,7 @@ router.post('/', async (req, res) => {
     }
   }
 
-  if (hasGemini) {
+  if (isCoding && hasGemini) {
     try {
       const text = await callGemini(normalizedMessages);
       return res.json({ text: scrubIdentity(text) });
@@ -208,8 +263,18 @@ router.post('/', async (req, res) => {
     }
   }
 
+  if (!isCoding && hasDeepSeek) {
+    try {
+      const text = await callDeepSeek(normalizedMessages);
+      return res.json({ text: scrubIdentity(text) });
+    } catch (error) {
+      lastError = error;
+      console.error('[chat] DeepSeek fallback failed:', error?.status || error?.message || 'unknown error');
+    }
+  }
+
   console.error('[chat] no configured service completed the request:', lastError?.status || lastError?.message || 'no credentials configured');
-  return res.status(hasHuggingFace || hasGemini ? 502 : 503).json({ error: GENERIC_ERROR.chat });
+  return res.status(hasHuggingFace || hasGemini || hasDeepSeek ? 502 : 503).json({ error: GENERIC_ERROR.chat });
 });
 
 export default router;
