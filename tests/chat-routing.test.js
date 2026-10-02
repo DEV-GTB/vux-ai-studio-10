@@ -44,7 +44,7 @@ beforeEach(() => {
   process.env.GEMINI_API_KEY = '';
   process.env.GEMINI_MODEL = 'gemma-4-31b-it';
   process.env.DEEPSEEK_API_KEY = '';
-  process.env.DEEPSEEK_MODEL = 'deepseek-chat';
+  process.env.DEEPSEEK_MODEL = 'deepseek-flash';
   process.env.HF_CHAT_MODEL = 'google/gemma-test';
   process.env.HF_DEEPSEEK_MODEL = 'deepseek-ai/deepseek-test';
   delete process.env.HF_VISION_MODEL;
@@ -111,7 +111,9 @@ test('coding requests prefer the configured DeepSeek API key', async () => {
   assert.equal(response.status, 200);
   assert.equal((await response.json()).text, 'Direct DeepSeek answer.');
   assert.equal(requestedUrl, 'https://api.deepseek.com/chat/completions');
-  assert.equal(requestBody.model, 'deepseek-chat');
+  assert.equal(requestBody.model, 'deepseek-flash');
+  assert.deepEqual(requestBody.thinking, { type: 'enabled' });
+  assert.equal(requestBody.reasoning_effort, 'high');
 });
 
 test('Gemma is used for ordinary chat without a systemInstruction field', async () => {

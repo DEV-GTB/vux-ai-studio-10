@@ -127,8 +127,10 @@ async function callDeepSeek(messages) {
       'Content-Type': 'application/json',
     },
     body: JSON.stringify({
-      model: process.env.DEEPSEEK_MODEL || 'deepseek-chat',
+      model: process.env.DEEPSEEK_MODEL || 'deepseek-flash',
       messages,
+      thinking: { type: 'enabled' },
+      reasoning_effort: 'high',
       stream: false,
     }),
   });
