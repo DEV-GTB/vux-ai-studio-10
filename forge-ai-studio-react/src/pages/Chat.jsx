@@ -1,6 +1,58 @@
 import { useState, useEffect, useRef } from 'react'
 import { apiUrl } from '../lib/api.js'
 
+const codeTokenPattern = /(\/\*[^]*?\*\/|\/\/[^\n]*|#[^\n]*|"(?:\\.|[^"\\])*"|'(?:\\.|[^'\\])*'|`(?:\\.|[^`\\])*`|\b(?:const|let|var|function|return|if|else|for|while|class|import|from|export|async|await|new|true|false|null|undefined|def|print|None|True|False|public|static|void|int|string|boolean)\b|\b\d+(?:\.\d+)?\b)/g
+
+function renderCode(code) {
+  return code.split(codeTokenPattern).map((token, index) => {
+    let color = ''
+    if (/^(\/\/|\/\*|#)/.test(token)) color = 'text-slate-500'
+    else if (/^["'`]/.test(token)) color = 'text-emerald-300'
+    else if (/^\d/.test(token)) color = 'text-amber-300'
+    else if (/^(const|let|var|function|return|if|else|for|while|class|import|from|export|async|await|new|def|public|static|void|int|string|boolean)$/.test(token)) color = 'text-cyan-300'
+    else if (/^(true|false|null|undefined|None|True|False)$/.test(token)) color = 'text-violet-300'
+    return color ? <span className={color} key={index}>{token}</span> : token
+  })
+}
+
+function renderInline(text, keyPrefix) {
+  return text.split(/(\*\*[^*]+\*\*|`[^`]+`)/g).map((part, index) => {
+    if (part.startsWith('**') && part.endsWith('**')) {
+      return <strong className="font-semibold text-forge-primary" key={`${keyPrefix}-${index}`}>{part.slice(2, -2)}</strong>
+    }
+    if (part.startsWith('`') && part.endsWith('`')) {
+      return <code className="rounded bg-black/30 px-1.5 py-0.5 font-mono text-xs text-emerald-200" key={`${keyPrefix}-${index}`}>{part.slice(1, -1)}</code>
+    }
+    return part
+  })
+}
+
+function renderMessage(content) {
+  if (Array.isArray(content)) {
+    return content.map((part, index) => {
+      if (part?.type === 'image_url' && typeof part.image_url?.url === 'string') {
+        return <img key={`image-${index}`} src={part.image_url.url} alt="Attached image" className="my-2 max-h-72 max-w-full rounded-lg border border-forge-border object-contain" />
+      }
+      if (part?.type === 'text') return <span key={`part-${index}`}>{renderMessage(part.text)}</span>
+      return null
+    })
+  }
+
+  return String(content).split(/(```[^\n]*\n[\s\S]*?```)/g).map((part, index) => {
+    if (!part.startsWith('```')) return <span key={`text-${index}`}>{renderInline(part, `inline-${index}`)}</span>
+
+    const firstNewline = part.indexOf('\n')
+    const language = part.slice(3, firstNewline).trim() || 'code'
+    const code = part.slice(firstNewline + 1, -3).replace(/\n$/, '')
+    return (
+      <div className="my-3 overflow-hidden rounded-lg border border-forge-border bg-[#080e13]" key={`code-${index}`}>
+        <div className="border-b border-forge-border px-3 py-2 font-mono text-xs text-forge-textMuted">{language}</div>
+        <pre className="max-w-full overflow-x-auto p-3 font-mono text-xs leading-6"><code>{renderCode(code)}</code></pre>
+      </div>
+    )
+  })
+}
+
 export function Chat({ setCurrentPage: _setCurrentPage, username }) {
   const [messages, setMessages] = useState([
     { role: 'assistant', content: 'Hello! I\'m Vux AI Studio. Your intelligent coding companion. How can I help you build amazing software today?' }
@@ -53,17 +105,30 @@ export function Chat({ setCurrentPage: _setCurrentPage, username }) {
   }, [messages, streamingMessage])
 
   const handleSend = async () => {
-    if (!input.trim()) return
+    const userText = input.trim()
+    if ((!userText && attachedFiles.length === 0) || isTyping || isStreaming) return
 
-    const userMessage = { role: 'user', content: input }
-    const nextMessages = [...messages, userMessage]
-    setMessages(nextMessages)
-    setInput('')
     setIsTyping(true)
-    setIsStreaming(true)
+    setIsStreaming(false)
     setStreamingMessage('')
 
     try {
+      const imageParts = await Promise.all(attachedFiles
+        .filter((file) => file.type.startsWith('image/'))
+        .map((file) => new Promise((resolve, reject) => {
+          const reader = new FileReader()
+          reader.onload = () => resolve({ type: 'image_url', image_url: { url: reader.result } })
+          reader.onerror = () => reject(new Error(`Could not read ${file.name}.`))
+          reader.readAsDataURL(file)
+        })))
+      const messageContent = imageParts.length
+        ? [...(userText ? [{ type: 'text', text: userText }] : [{ type: 'text', text: 'Describe the attached image.' }]), ...imageParts]
+        : userText
+      const nextMessages = [...messages, { role: 'user', content: messageContent }]
+      setMessages(nextMessages)
+      setInput('')
+      setAttachedFiles([])
+
       const response = await fetch(apiUrl('/api/chat'), {
         method: 'POST',
         headers: { 'Content-Type': 'application/json' },
@@ -76,14 +141,32 @@ export function Chat({ setCurrentPage: _setCurrentPage, username }) {
       })
 
       const data = await response.json()
-      const content = response.ok ? (data.text || 'No response received.') : (data.error || 'Chat request failed.')
+      const replyText = response.ok ? (data.text || 'No response received.') : (data.error || 'Chat request failed.')
 
-      setMessages((prev) => [...prev, { role: 'assistant', content }])
-      setStreamingMessage('')
-      setIsStreaming(false)
+      setIsTyping(false)
+      setIsStreaming(true)
+      const totalSteps = Math.min(replyText.length, 120)
+      const chunkSize = Math.max(1, Math.ceil(replyText.length / Math.max(totalSteps, 1)))
+      const delay = totalSteps ? Math.min(42, 5000 / totalSteps) : 0
+      await new Promise((resolve) => {
+        let cursor = 0
+        const revealChunk = () => {
+          cursor = Math.min(replyText.length, cursor + chunkSize)
+          setStreamingMessage(replyText.slice(0, cursor))
+          if (cursor < replyText.length) {
+            window.setTimeout(revealChunk, delay)
+          } else {
+            setMessages((prev) => [...prev, { role: 'assistant', content: replyText }])
+            setStreamingMessage('')
+            setIsStreaming(false)
+            resolve()
+          }
+        }
+        revealChunk()
+      })
     } catch (error) {
       console.error('Chat request failed:', error)
-      setMessages((prev) => [...prev, { role: 'assistant', content: 'Vux AI Studio had trouble generating a reply right now. Please try again shortly.' }])
+      setMessages((prev) => [...prev, { role: 'assistant', content: 'The assistant service could not be reached. Check your connection and try again.' }])
       setStreamingMessage('')
       setIsStreaming(false)
     } finally {
@@ -92,8 +175,15 @@ export function Chat({ setCurrentPage: _setCurrentPage, username }) {
   }
 
   const handleFileUpload = (e) => {
-    const files = Array.from(e.target.files)
-    setAttachedFiles(prev => [...prev, ...files])
+    const files = Array.from(e.target.files || []).filter((file) => file.type.startsWith('image/'))
+    const oversized = files.find((file) => file.size > 6 * 1024 * 1024)
+    if (oversized) {
+      e.target.value = ''
+      setMessages((prev) => [...prev, { role: 'assistant', content: 'Images must be smaller than 6 MB to attach.' }])
+      return
+    }
+    setAttachedFiles((prev) => [...prev, ...files])
+    e.target.value = ''
   }
 
   const removeFile = (index) => {
@@ -189,7 +279,7 @@ export function Chat({ setCurrentPage: _setCurrentPage, username }) {
                     <span className="text-xs text-forge-primary font-medium">Vux AI Studio</span>
                   </div>
                 )}
-                <div className={`text-sm whitespace-pre-wrap ${message.role === 'assistant' ? 'chat-message-assistant' : 'chat-message-user'}`}>{message.content}</div>
+                <div className={`text-sm whitespace-pre-wrap ${message.role === 'assistant' ? 'chat-message-assistant' : 'chat-message-user'}`}>{renderMessage(message.content)}</div>
               </div>
             </div>
           ))}
@@ -203,7 +293,7 @@ export function Chat({ setCurrentPage: _setCurrentPage, username }) {
                   <span className="text-xs text-forge-primary font-medium">Vux AI Studio</span>
                 </div>
                 <div className="text-sm whitespace-pre-wrap chat-message-assistant">
-                  {streamingMessage}
+                  {renderMessage(streamingMessage)}
                   {isStreaming && <span className="typing-cursor"></span>}
                 </div>
               </div>
@@ -217,10 +307,14 @@ export function Chat({ setCurrentPage: _setCurrentPage, username }) {
                   <div className="w-6 h-6 rounded bg-gradient-to-br from-forge-primary to-forge-ai flex items-center justify-center text-xs">✨</div>
                   <span className="text-xs text-forge-primary font-medium">Vux AI Studio</span>
                 </div>
-                <div className="flex items-center gap-1">
-                  <div className="w-2 h-2 rounded-full bg-forge-primary animate-bounce"></div>
-                  <div className="w-2 h-2 rounded-full bg-forge-primary animate-bounce" style={{ animationDelay: '0.1s' }}></div>
-                  <div className="w-2 h-2 rounded-full bg-forge-primary animate-bounce" style={{ animationDelay: '0.2s' }}></div>
+                <div className="flex items-center gap-2" role="status" aria-label="Vux is thinking">
+                  <div className="flex items-center gap-1">
+                    <div className="w-2 h-2 rounded-full bg-forge-primary animate-bounce"></div>
+                    <div className="w-2 h-2 rounded-full bg-forge-primary animate-bounce" style={{ animationDelay: '0.1s' }}></div>
+                    <div className="w-2 h-2 rounded-full bg-forge-primary animate-bounce" style={{ animationDelay: '0.2s' }}></div>
+                  </div>
+                  <span className="chat-thinking-particles" aria-hidden="true"><i /><i /><i /></span>
+                  <span className="text-xs text-forge-textMuted">Thinking</span>
                 </div>
               </div>
             </div>
@@ -258,6 +352,7 @@ export function Chat({ setCurrentPage: _setCurrentPage, username }) {
             <input
               ref={fileInputRef}
               type="file"
+              accept="image/*"
               multiple
               onChange={handleFileUpload}
               className="hidden"
@@ -278,13 +373,15 @@ export function Chat({ setCurrentPage: _setCurrentPage, username }) {
               value={input}
               onChange={(e) => setInput(e.target.value)}
               onKeyDown={(e) => e.key === 'Enter' && !e.shiftKey && (e.preventDefault(), handleSend())}
+              disabled={isTyping || isStreaming}
               placeholder="Ask anything..."
               className="w-full bg-forge-surfaceLow border border-forge-border rounded-xl px-4 py-3 pr-12 text-sm text-forge-text focus:outline-none focus:border-forge-primary transition-all resize-none placeholder-forge-textDim"
               rows={2}
             />
             <button
               onClick={handleSend}
-              className="absolute right-3 bottom-3 w-8 h-8 rounded-lg bg-forge-primary text-black flex items-center justify-center hover:bg-forge-primaryHover transition-all"
+              disabled={isTyping || isStreaming || !input.trim()}
+              className="absolute right-3 bottom-3 w-8 h-8 rounded-lg bg-forge-primary text-black flex items-center justify-center hover:bg-forge-primaryHover transition-all disabled:opacity-40 disabled:cursor-not-allowed"
             >
               →
             </button>

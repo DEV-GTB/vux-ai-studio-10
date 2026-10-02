@@ -1,6 +1,6 @@
 import app from '../server.js';
 
-import { IDENTITY_PROMPT, scrubIdentity, GENERIC_ERROR } from '../lib/identity.js';
+import { IDENTITY_PROMPT, scrubIdentity, GENERIC_ERROR, getIdentityResponse } from '../lib/identity.js';
 
 const FORCE_ENGLISH_INSTRUCTIONS = `
 You are Vux AI Studio.
@@ -36,23 +36,6 @@ function buildMessages(messages) {
 
     return { role: 'user', content: finalContent };
   });
-}
-
-function getIdentityResponse(messages) {
-  const latestUserMessage = [...messages].reverse().find((message) => message.role === 'user');
-  const text = String(latestUserMessage?.content || '').toLowerCase().trim();
-  if (!text) return null;
-
-  if (/^(who are you|what are you|what is this ai|who is this ai)\??$/.test(text)) {
-    return 'I am Vux AI Studio, your secure assistant for chat, coding help, and creative work.';
-  }
-  if (/\b(who (made|created|built|developed) you|who is your founder|who founded you)\b/.test(text)) {
-    return 'Vux AI Studio was developed by Game Theory Building Studio. The owners are Muhammed Thariq P.S and Gokul S Nair.';
-  }
-  if (/\bwho (are|is) the (co-?founders?|engineering team)\b/.test(text)) {
-    return 'The AI Engineers are Muhammed Thariq P.S and Gokul S Nair.';
-  }
-  return null;
 }
 
 async function callGemini(messages) {

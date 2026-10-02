@@ -1,6 +1,6 @@
 import { useState, useRef, useEffect, Suspense } from 'react'
-import { Canvas, useLoader } from '@react-three/fiber'
-import { OrbitControls, Environment, useGLTF, ContactShadows } from '@react-three/drei'
+import { Canvas } from '@react-three/fiber'
+import { Bounds, OrbitControls, Environment, useGLTF, ContactShadows } from '@react-three/drei'
 import * as THREE from 'three'
 import { apiUrl } from '../lib/api.js'
 
@@ -53,6 +53,7 @@ export function Object3D({ setCurrentPage: _setCurrentPage, username: _username 
   const [mode, setMode] = useState('text') // 'text' or 'image'
   const [prompt, setPrompt] = useState('')
   const [uploadedImage, setUploadedImage] = useState(null)
+  const [uploadedImageFile, setUploadedImageFile] = useState(null)
   const [generatedModel, setGeneratedModel] = useState(null)
   const [isGenerating, setIsGenerating] = useState(false)
   const [progress, setProgress] = useState(0)
@@ -62,8 +63,38 @@ export function Object3D({ setCurrentPage: _setCurrentPage, username: _username 
   const [showChat, setShowChat] = useState(false)
   const [chatMessages, setChatMessages] = useState([])
   const [chatInput, setChatInput] = useState('')
+  const [isChatThinking, setIsChatThinking] = useState(false)
+  const [previewLightboxOpen, setPreviewLightboxOpen] = useState(false)
+  const [previewZoom, setPreviewZoom] = useState(1)
   const fileInputRef = useRef(null)
   const canvasRef = useRef(null)
+  const modelObjectUrls = useRef(new Set())
+
+  useEffect(() => () => {
+    modelObjectUrls.current.forEach((url) => URL.revokeObjectURL(url))
+    modelObjectUrls.current.clear()
+  }, [])
+
+  useEffect(() => {
+    const retainedUrls = new Set([generatedModel, ...modelHistory.map((model) => model.data)]
+      .filter((value) => typeof value === 'string' && value.startsWith('blob:')))
+
+    modelObjectUrls.current.forEach((url) => {
+      if (!retainedUrls.has(url)) {
+        URL.revokeObjectURL(url)
+        modelObjectUrls.current.delete(url)
+      }
+    })
+  }, [generatedModel, modelHistory])
+
+  useEffect(() => {
+    if (!previewLightboxOpen) return
+    const closeOnEscape = (event) => {
+      if (event.key === 'Escape') setPreviewLightboxOpen(false)
+    }
+    window.addEventListener('keydown', closeOnEscape)
+    return () => window.removeEventListener('keydown', closeOnEscape)
+  }, [previewLightboxOpen])
 
   const samplePrompts = [
     'A futuristic robot arm with articulated joints',
@@ -72,10 +103,11 @@ export function Object3D({ setCurrentPage: _setCurrentPage, username: _username 
     'A fantasy sword with ornate decorations',
     'A modern office chair with ergonomic design',
   ]
+  const activeModelInfo = modelHistory.find((model) => model.data === generatedModel)
 
   const generate3DModel = async () => {
     if (mode === 'text' && !prompt.trim()) return
-    if (mode === 'image' && !uploadedImage) return
+    if (mode === 'image' && !uploadedImageFile) return
 
     setIsGenerating(true)
     setProgress(0)
@@ -93,38 +125,44 @@ export function Object3D({ setCurrentPage: _setCurrentPage, username: _username 
         })
       }, 300)
 
-      const response = await fetch(apiUrl('/api/3d'), {
-        method: 'POST',
-        headers: {
-          'Content-Type': 'application/json',
-        },
-        body: JSON.stringify({
-          prompt: mode === 'text' ? prompt : '',
-          image: mode === 'image' ? uploadedImage : null,
-          mode,
-        }),
-      })
+      let response
+      if (mode === 'image') {
+        const formData = new FormData()
+        formData.append('image', uploadedImageFile, uploadedImageFile.name)
+        response = await fetch(apiUrl('/api/3d/image-to-3d'), { method: 'POST', body: formData })
+      } else {
+        response = await fetch(apiUrl('/api/3d'), {
+          method: 'POST',
+          headers: { 'Content-Type': 'application/json' },
+          body: JSON.stringify({ prompt, mode: 'text' }),
+        })
+      }
 
       clearInterval(progressInterval)
 
       if (!response.ok) {
-        const errorData = await response.json()
+        const errorData = await response.json().catch(() => ({}))
         console.error('3D generation error:', errorData)
-        throw new Error(errorData.error || errorData.details || 'Failed to generate 3D model')
+        throw new Error(errorData.error || 'Failed to generate 3D model')
       }
 
-      const data = await response.json()
+      const modelBlob = await response.blob()
+      if (modelBlob.type !== 'model/gltf-binary' && modelBlob.type !== 'application/octet-stream') {
+        throw new Error('The 3D service returned an unsupported file instead of a GLB model.')
+      }
+      const modelUrl = URL.createObjectURL(modelBlob)
+      modelObjectUrls.current.add(modelUrl)
       setProgress(100)
-      setGeneratedModel(data.model)
+      setGeneratedModel(modelUrl)
 
       const newModel = {
         id: Date.now(),
-        data: data.model,
+        data: modelUrl,
         prompt: mode === 'text' ? prompt : 'Image to 3D',
         timestamp: new Date().toLocaleString(),
         mode,
-        format: data.format,
-        preview: data.preview,
+        format: 'glb',
+        preview: false,
       }
 
       setModelHistory(prev => [newModel, ...prev.slice(0, 9)])
@@ -138,8 +176,15 @@ export function Object3D({ setCurrentPage: _setCurrentPage, username: _username 
   }
 
   const handleImageUpload = (e) => {
-    const file = e.target.files[0]
+    const file = e.target.files?.[0]
     if (file) {
+      if (file.size > 8 * 1024 * 1024) {
+        setErrorMessage('Images must be 8 MB or smaller.')
+        e.target.value = ''
+        return
+      }
+      setErrorMessage('')
+      setUploadedImageFile(file)
       const reader = new FileReader()
       reader.onload = (event) => {
         setUploadedImage(event.target.result)
@@ -150,6 +195,7 @@ export function Object3D({ setCurrentPage: _setCurrentPage, username: _username 
 
   const clearImage = () => {
     setUploadedImage(null)
+    setUploadedImageFile(null)
   }
 
   const downloadModel = () => {
@@ -157,7 +203,7 @@ export function Object3D({ setCurrentPage: _setCurrentPage, username: _username 
     try {
       const link = document.createElement('a')
       link.href = generatedModel
-      link.download = '3d-model.glb'
+      link.download = activeModelInfo?.preview ? '3d-concept-preview.png' : `3d-model.${activeModelInfo?.format || 'glb'}`
       document.body.appendChild(link)
       link.click()
       document.body.removeChild(link)
@@ -168,24 +214,47 @@ export function Object3D({ setCurrentPage: _setCurrentPage, username: _username 
   }
 
   const sendChatMessage = async () => {
-    if (!chatInput.trim()) return
+    if (!chatInput.trim() || isChatThinking) return
 
+    const question = chatInput.trim()
     const newMessage = {
       role: 'user',
-      content: chatInput,
+      content: question,
       image: uploadedImage,
     }
 
     setChatMessages(prev => [...prev, newMessage])
     setChatInput('')
+    setIsChatThinking(true)
 
-    // Simulate AI response (in production, this would call your chat API)
-    setTimeout(() => {
-      setChatMessages(prev => [...prev, {
+    try {
+      const response = await fetch(apiUrl('/api/chat'), {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({
+          messages: [
+            ...chatMessages.map(({ role, content }) => ({ role, content })),
+            {
+              role: 'user',
+              content: `${question}\n\nThe user is in the 3D object generator (${mode} mode). Current prompt: ${prompt || 'none'}. Give a concise text answer and do not claim a 3D asset was created unless generation has completed.`,
+            },
+          ],
+        }),
+      })
+      const data = await response.json()
+      setChatMessages((previous) => [...previous, {
         role: 'assistant',
-        content: `I understand you want to create: "${chatInput}". ${mode === 'text' ? 'I can help you generate a 3D model from this description.' : 'I can help you convert this image to a 3D model.'} Please click the Generate button to proceed.`,
+        content: response.ok ? (data.text || 'No response received.') : (data.error || 'The assistant could not answer just now.'),
       }])
-    }, 1000)
+    } catch (error) {
+      console.error('3D assistant request failed:', error)
+      setChatMessages((previous) => [...previous, {
+        role: 'assistant',
+        content: 'The assistant could not answer just now. Please try again.',
+      }])
+    } finally {
+      setIsChatThinking(false)
+    }
   }
 
   return (
@@ -253,7 +322,7 @@ export function Object3D({ setCurrentPage: _setCurrentPage, username: _username 
             </div>
 
             {/* Input Section */}
-            <div className="bg-forge-surface border border-forge-border rounded-2xl p-6 relative overflow-hidden scale-in">
+                      : 'bg-forge-surfaceLow border border-forge-border hover:border-forge-primary'
               <div className="absolute inset-0 overflow-hidden pointer-events-none">
                 <div className="absolute top-0 right-0 w-64 h-64 bg-forge-primary/10 rounded-full blur-3xl float-animation"></div>
                 <div className="absolute bottom-0 left-0 w-48 h-48 bg-forge-ai/10 rounded-full blur-3xl float-animation" style={{ animationDelay: '1s' }}></div>
@@ -293,7 +362,7 @@ export function Object3D({ setCurrentPage: _setCurrentPage, username: _username 
                     <input
                       ref={fileInputRef}
                       type="file"
-                      accept="image/*"
+                      accept="image/png,image/jpeg"
                       onChange={handleImageUpload}
                       className="hidden"
                     />
@@ -388,29 +457,37 @@ export function Object3D({ setCurrentPage: _setCurrentPage, username: _username 
 
                 <div className="relative z-10">
                   <div className="flex items-center justify-between mb-4">
-                    <h2 className="text-lg font-display font-semibold">3D PREVIEW</h2>
+                    <h2 className="text-lg font-display font-semibold">{activeModelInfo?.preview ? 'IMAGE CONCEPT PREVIEW' : '3D PREVIEW'}</h2>
                     <div className="flex items-center gap-2">
                       <button
                         onClick={downloadModel}
                         className="px-3 py-1.5 bg-forge-surfaceLow border border-forge-border rounded-lg text-sm hover:bg-forge-surfaceHigh transition-all"
                       >
-                        📥 Download GLB
+                        📥 Download {activeModelInfo?.preview ? 'PNG' : 'GLB'}
                       </button>
                     </div>
                   </div>
 
                   <div className="rounded-xl overflow-hidden border border-forge-border bg-black/20" style={{ height: '400px' }}>
-                    <Canvas camera={{ position: [0, 0, 5], fov: 50 }}>
-                      <Scene3D 
-                        modelUrl={generatedModel} 
-                        isPreview={modelHistory.find(m => m.data === generatedModel)?.preview || false}
+                    {activeModelInfo?.preview ? (
+                      <img
+                        src={generatedModel}
+                        alt="Generated 3D concept preview"
+                        onClick={() => { setPreviewZoom(1); setPreviewLightboxOpen(true) }}
+                        className="h-full w-full cursor-zoom-in object-contain"
                       />
-                    </Canvas>
+                    ) : (
+                      <Canvas dpr={[1, 2]} gl={{ antialias: true, alpha: true }} camera={{ position: [0, 0, 5], fov: 50 }}>
+                        <Bounds fit clip observe margin={1.25}>
+                          <Scene3D modelUrl={generatedModel} isPreview={false} />
+                        </Bounds>
+                      </Canvas>
+                    )}
                   </div>
 
-                  {modelHistory.find(m => m.data === generatedModel)?.preview && (
+                  {activeModelInfo?.preview && (
                     <p className="mt-2 text-xs text-forge-textMuted text-center">
-                      Preview mode - Full 3D model support coming soon
+                      This generation is a 2D concept image. It is available as a PNG preview, not an editable 3D mesh.
                     </p>
                   )}
                 </div>
@@ -486,6 +563,7 @@ export function Object3D({ setCurrentPage: _setCurrentPage, username: _username 
                       <p className="text-sm">{msg.content}</p>
                     </div>
                   ))}
+                  {isChatThinking && <div className="text-sm text-forge-textMuted" role="status">Thinking...</div>}
                 </div>
 
                 <div className="flex gap-2">
@@ -494,11 +572,13 @@ export function Object3D({ setCurrentPage: _setCurrentPage, username: _username 
                     onChange={(e) => setChatInput(e.target.value)}
                     placeholder="Describe what you want to create..."
                     className="flex-1 bg-forge-surfaceLow border border-forge-border rounded-lg px-3 py-2 text-sm text-forge-text focus:outline-none focus:border-forge-primary transition-all placeholder-forge-textDim"
-                    onKeyPress={(e) => e.key === 'Enter' && sendChatMessage()}
+                    onKeyDown={(e) => e.key === 'Enter' && !e.shiftKey && (e.preventDefault(), sendChatMessage())}
+                    disabled={isChatThinking}
                   />
                   <button
                     onClick={sendChatMessage}
                     className="px-3 py-2 bg-forge-primary text-black rounded-lg hover:bg-forge-primaryHover transition-all"
+                    disabled={isChatThinking || !chatInput.trim()}
                   >
                     Send
                   </button>
@@ -583,7 +663,7 @@ export function Object3D({ setCurrentPage: _setCurrentPage, username: _username 
                   </div>
                   <div className="flex justify-between items-center">
                     <span className="text-sm text-forge-textMuted">Format</span>
-                    <span className="font-semibold text-xs">GLB</span>
+                    <span className="font-semibold text-xs">{activeModelInfo?.format?.toUpperCase() || 'GLB'}</span>
                   </div>
                 </div>
               </div>
@@ -591,6 +671,5 @@ export function Object3D({ setCurrentPage: _setCurrentPage, username: _username 
           )}
         </div>
       </div>
-    </div>
   )
 }

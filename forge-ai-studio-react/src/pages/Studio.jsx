@@ -98,6 +98,27 @@ function extractCode(text) {
   return match ? match[1].trim() : String(text || '').trim()
 }
 
+function parseAiFileAction(text) {
+  const source = String(text || '').trim()
+  const block = source.match(/```(?:json)?\s*([\s\S]*?)```/i)
+  for (const candidate of [block?.[1], source].filter(Boolean)) {
+    try {
+      const value = JSON.parse(candidate)
+      if (['edit', 'create', 'delete', 'answer'].includes(value?.action)) return value
+    } catch {
+      // Non-JSON code replies use the existing active-file edit flow.
+    }
+  }
+  return null
+}
+
+function isSafeWorkspaceFileName(name) {
+  return typeof name === 'string' && name.trim().length > 0 && name.length <= 180 &&
+    !name.startsWith('/') && !name.startsWith('\\') &&
+    !name.split(/[\\/]/).some((part) => part === '..' || part === '.') &&
+    !/[<>:"|?*\0]/.test(name)
+}
+
 // Activity bar items
 const activityBarItems = [
   { id: 'explorer', icon: '📁', label: 'Explorer' },
@@ -636,6 +657,10 @@ export function Studio({ username }) {
       setTerminalHistory(prev => [...prev, { type: 'error', text: 'No run command detected for this project type' }])
       return
     }
+    if (!window.confirm(`Allow Studio to run this command in the workspace?\n\n$ ${projectInfo.runCommand}`)) {
+      setTerminalHistory(prev => [...prev, { type: 'info', text: 'Command cancelled.' }])
+      return
+    }
 
     try {
       setIsRunning(true)
@@ -668,6 +693,9 @@ export function Studio({ username }) {
 
     try {
       const allIssues = [...projectHealth.issues, ...projectHealth.warnings]
+      const installsDependencies = allIssues.some(issue => issue.includes('Dependencies not installed'))
+      if (installsDependencies && !window.confirm('Allow Studio to run this command in the workspace?\n\n$ npm install')) return
+
       const response = await fetch(apiUrl('/api/project/fix'), {
         method: 'POST',
         headers: { 'Content-Type': 'application/json' },
@@ -765,6 +793,10 @@ export function Studio({ username }) {
   const runTests = async () => {
     if (!projectInfo?.testCommand) {
       setTestResults([{ name: 'No tests configured', status: 'skipped', output: 'No test command found for this project type' }])
+      return
+    }
+    if (!window.confirm(`Allow Studio to run this command in the workspace?\n\n$ ${projectInfo.testCommand}`)) {
+      setTestResults([{ name: 'Test execution', status: 'skipped', output: 'Command cancelled.' }])
       return
     }
 
@@ -896,7 +928,7 @@ export function Studio({ username }) {
         method: 'POST',
         headers: { 'Content-Type': 'application/json' },
         body: JSON.stringify({ messages: [
-          { role: 'user', content: `You are editing ${activeTab || 'a new file'} in project ${project.name}. Current code:\n\n${draft}\n\nRequest: ${aiPrompt}\nReturn the complete updated file in one code block and no explanation.` },
+          { role: 'user', content: `You are assisting with project ${project.name} in Vux AI Studio. Active file: ${activeTab || 'none'}. Existing files: ${fileNames.join(', ')}. Current file content:\n\n${draft}\n\nUser request: ${aiPrompt}\n\nReturn exactly one JSON object with one of these actions: {"action":"edit","filename":"existing file","content":"complete updated file"}; {"action":"create","filename":"new file","content":"complete file content"}; {"action":"delete","filename":"existing file","reason":"brief reason"}; or {"action":"answer","message":"explanation only"}. Use edit for an existing file, create only when requested, and delete only when explicitly requested. Never include markdown fences. Do not claim a file changed; the user must approve with Apply.` },
         ] }),
       })
       const data = await response.json()
@@ -912,7 +944,58 @@ export function Studio({ username }) {
 
   const applyAiReply = () => {
     if (!aiReply || aiReply.startsWith('AI error:')) return
-    updateDraft(extractCode(aiReply))
+    const operation = parseAiFileAction(aiReply)
+    if (operation?.action === 'answer') return
+
+    const fileName = operation?.filename?.trim() || activeTab
+    if (!isSafeWorkspaceFileName(fileName)) {
+      setAiReply('The proposed file name is invalid. Use a relative workspace file name.');
+      return
+    }
+
+    if (operation?.action === 'delete') {
+      if (!Object.prototype.hasOwnProperty.call(project.files, fileName)) {
+        setAiReply(`The proposed file does not exist: ${fileName}`);
+        return
+      }
+      if (!window.confirm(`Allow the assistant to delete ${fileName}?\n\n${operation.reason || 'This action cannot be undone.'}`)) return
+      setProjects((current) => current.map((item, index) => (
+        index === projectIndex ? { ...item, files: Object.fromEntries(Object.entries(item.files).filter(([key]) => key !== fileName)) } : item
+      )))
+      const remainingTabs = openTabs.filter((tab) => tab !== fileName)
+      setOpenTabs(remainingTabs)
+      if (activeTab === fileName) {
+        const nextTab = remainingTabs[remainingTabs.length - 1] || ''
+        setActiveTab(nextTab)
+        setDraft(project.files[nextTab] || '')
+      }
+      return
+    }
+
+    const content = typeof operation?.content === 'string' ? operation.content : extractCode(aiReply)
+    if (content.length > 1024 * 1024) {
+      setAiReply('The proposed file exceeds the 1 MB limit.');
+      return
+    }
+
+    if (operation?.action === 'create' && Object.prototype.hasOwnProperty.call(project.files, fileName) &&
+      !window.confirm(`${fileName} already exists. Allow the assistant to overwrite it?`)) return
+
+    if (operation?.action === 'create' || operation?.action === 'edit') {
+      if (operation.action === 'edit' && !Object.prototype.hasOwnProperty.call(project.files, fileName)) {
+        setAiReply(`The proposed edit targets a file that does not exist: ${fileName}`);
+        return
+      }
+      setProjects((current) => current.map((item, index) => (
+        index === projectIndex ? { ...item, files: { ...item.files, [fileName]: content } } : item
+      )))
+      setOpenTabs((current) => current.includes(fileName) ? current : [...current, fileName])
+      setActiveTab(fileName)
+      setDraft(content)
+      return
+    }
+
+    if (activeTab) updateDraft(content)
   }
 
   const handleTerminalCommand = async (event) => {
@@ -920,6 +1003,14 @@ export function Studio({ username }) {
     if (!terminalInput.trim()) return
     
     const command = terminalInput.trim()
+    const requiresApproval = command.startsWith('npm ') || command === 'npm' || command.startsWith('git ') || command === 'git' ||
+      command.startsWith('node ') || command === 'node' || command.startsWith('python ') || command === 'python' ||
+      command.startsWith('pip ') || command === 'pip' || command.startsWith('npx ') || command.startsWith('yarn ')
+    if (requiresApproval && !window.confirm(`Allow Studio to run this command in the workspace?\n\n$ ${command}`)) {
+      setTerminalHistory((prev) => [...prev, { type: 'info', text: 'Command cancelled.' }])
+      setTerminalInput('')
+      return
+    }
     setTerminalHistory(prev => [...prev, { type: 'command', text: `$ ${command}` }])
     
     // Built-in commands

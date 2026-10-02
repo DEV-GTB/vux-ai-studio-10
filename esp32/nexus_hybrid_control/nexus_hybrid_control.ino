@@ -7,6 +7,7 @@
 #include <Adafruit_GFX.h>
 #include <Adafruit_SSD1306.h>
 #include <ArduinoJson.h>
+#include <EEPROM.h>
 #include <freertos/FreeRTOS.h>
 #include <freertos/task.h>
 #include <math.h>
@@ -77,6 +78,7 @@ bool room2Light = false;
 bool protectionLatched = false;
 bool currentSampleValid = false;
 bool cloudStatusAccepted = false;
+bool localControlActive = false;
 float systemCurrent = 0.0f;
 uint32_t lastCurrentSampleAt = 0;
 uint32_t lastDisplayAt = 0;
@@ -84,6 +86,20 @@ uint32_t overcurrentStartedAt = 0;
 uint32_t safeCurrentStartedAt = 0;
 uint32_t nextWifiAttemptAt = 0;
 uint32_t wifiRetryDelayMs = WIFI_RETRY_INTERVAL_MS;
+bool alertActive = false;
+uint32_t lastNotificationAtMs = 0;
+uint32_t lastUsageSaveAtMs = 0;
+
+struct DeviceUsageStats {
+  uint32_t magic;
+  uint32_t totalOnSeconds;
+  uint32_t totalAlertCount;
+  uint32_t lastAlertEpoch;
+  float peakCurrent;
+  float totalEnergyWh;
+};
+
+DeviceUsageStats usageStats = { 0x4E585354u, 0, 0, 0, 0.0f, 0.0f };
 
 struct DeviceSnapshot {
   bool room1Fan;
@@ -165,12 +181,85 @@ void setRelay(uint8_t pin, bool on) {
   digitalWrite(pin, RELAY_ACTIVE_LOW ? !on : on);
 }
 
-void setAllLoadsOffLocked() {
+void allLoadsOff() {
   room1Fan = room1Light = room2Fan = room2Light = false;
   setRelay(ROOM1_FAN_PIN, false);
   setRelay(ROOM1_LIGHT_PIN, false);
   setRelay(ROOM2_FAN_PIN, false);
   setRelay(ROOM2_LIGHT_PIN, false);
+}
+
+void setAllLoadsOffLocked() {
+  allLoadsOff();
+}
+
+bool anyLoadActive() {
+  return room1Fan || room1Light || room2Fan || room2Light;
+}
+
+void loadUsageStats() {
+  EEPROM.begin(sizeof(DeviceUsageStats));
+  EEPROM.get(0, usageStats);
+  if (usageStats.magic != 0x4E585354u) {
+    usageStats = { 0x4E585354u, 0, 0, 0, 0.0f, 0.0f };
+    EEPROM.put(0, usageStats);
+    EEPROM.commit();
+  }
+  lastUsageSaveAtMs = millis();
+}
+
+void saveUsageStats() {
+  EEPROM.put(0, usageStats);
+  EEPROM.commit();
+  lastUsageSaveAtMs = millis();
+}
+
+void updateUsageStats() {
+  const uint32_t now = millis();
+  if (!anyLoadActive()) return;
+  if (now - lastUsageSaveAtMs < 1000) return;
+  const float watts = systemCurrent * 230.0f;
+  const float energyWh = (watts / 3600.0f) * (float)(now - lastUsageSaveAtMs) / 1000.0f;
+  usageStats.totalOnSeconds += (now - lastUsageSaveAtMs) / 1000;
+  usageStats.totalEnergyWh += energyWh;
+  if (systemCurrent > usageStats.peakCurrent) usageStats.peakCurrent = systemCurrent;
+  if (now - lastUsageSaveAtMs > 60000) {
+    saveUsageStats();
+  }
+}
+
+void triggerAlert(const char* type, const char* message) {
+  const uint32_t now = millis();
+  if (alertActive && now - lastNotificationAtMs < 30000UL) return;
+  alertActive = true;
+  lastNotificationAtMs = now;
+  usageStats.totalAlertCount += 1;
+  usageStats.lastAlertEpoch = now / 1000;
+  digitalWrite(STATUS_LED_PIN, HIGH);
+  tone(BUZZER_PIN, 2200, 180);
+  Serial.printf("ALERT %s: %s\n", type, message);
+  if (WiFi.status() == WL_CONNECTED && cloudConfigured()) {
+    WiFiClientSecure client;
+    client.setCACert(GLOBALSIGN_ECC_ROOT_CA_R4);
+    HTTPClient http;
+    const String url = String(SERVER_URL) + "/api/device/alert";
+    if (http.begin(client, url)) {
+      http.setConnectTimeout(8000);
+      http.setTimeout(8000);
+      http.addHeader("Authorization", String("Bearer ") + DEVICE_TOKEN);
+      http.addHeader("Content-Type", "application/json");
+      StaticJsonDocument<256> alert;
+      alert["deviceId"] = DEVICE_ID;
+      alert["type"] = type;
+      alert["message"] = message;
+      alert["currentA"] = systemCurrent;
+      alert["timestamp"] = now / 1000;
+      String body;
+      serializeJson(alert, body);
+      http.POST(body);
+      http.end();
+    }
+  }
 }
 
 bool setAppliance(uint8_t room, const char* appliance, bool on) {
@@ -210,6 +299,7 @@ void updateProtection() {
       protectionLatched = true;
       setAllLoadsOffLocked();
       protectionTripped = true;
+      alertActive = false;
     }
   } else {
     overcurrentStartedAt = 0;
@@ -217,10 +307,18 @@ void updateProtection() {
   }
   portEXIT_CRITICAL(&deviceStateMux);
 
+  const uint32_t now = millis();
   digitalWrite(STATUS_LED_PIN, protectionLatched ? HIGH : LOW);
   if (protectionTripped) {
     Serial.println("LOCAL PROTECTION LATCHED; all relays off");
-    tone(BUZZER_PIN, 2200, 120);
+    triggerAlert("OVER_CURRENT", "Current exceeded the configured safe limit; all loads switched off.");
+  } else if (systemCurrent > OVERCURRENT_LIMIT_AMPS * 0.75f) {
+    if (alertActive && now - lastNotificationAtMs > 30000UL) {
+      alertActive = false;
+    }
+    triggerAlert("CURRENT_WARNING", "Current is rising toward the protection threshold.");
+  } else {
+    alertActive = false;
   }
 }
 
@@ -254,10 +352,18 @@ void sendState() {
   state["protectionLatched"] = snapshot.protectionLatched;
   state["overcurrentVerifying"] = snapshot.overcurrentVerifying;
   state["current"] = snapshot.current;
+  state["currentLimitA"] = OVERCURRENT_LIMIT_AMPS;
   state["cloudConnected"] = stationConnected && snapshot.cloudStatusAccepted;
   state["wifiConnected"] = stationConnected;
   state["localApConnected"] = true;
+  state["localControlActive"] = true;
+  state["cloudModeEnabled"] = cloudConfigured();
   state["wifiRSSI"] = stationConnected ? WiFi.RSSI() : 0;
+  state["usageSeconds"] = usageStats.totalOnSeconds;
+  state["peakCurrentA"] = usageStats.peakCurrent;
+  state["totalEnergyWh"] = usageStats.totalEnergyWh;
+  state["lastAlertAt"] = usageStats.lastAlertEpoch;
+  state["alertType"] = alertActive ? "OVER_CURRENT" : "NONE";
   state["room1Fan"] = snapshot.room1Fan;
   state["room1Light"] = snapshot.room1Light;
   state["room2Fan"] = snapshot.room2Fan;
@@ -315,6 +421,7 @@ void cloudRequestFailed(const char* action, int code) {
   cloudStatusAccepted = false;
   portEXIT_CRITICAL(&deviceStateMux);
   Serial.printf("Cloud %s failed: HTTP %d\n", action, code);
+  Serial.println("Local AP control remains active at http://192.168.4.1/");
 }
 
 void sendCloudStatus() {
@@ -335,9 +442,14 @@ void sendCloudStatus() {
   status["firmwareVersion"] = "2.0.0-hybrid";
   status["state"] = stateCode(snapshot);
   if (snapshot.currentSampleValid) status["systemCurrent"] = snapshot.current;
+  status["currentLimitA"] = OVERCURRENT_LIMIT_AMPS;
   status["wifiConnected"] = true;
   status["localApConnected"] = true;
   status["wifiRSSI"] = WiFi.RSSI();
+  status["usageSeconds"] = usageStats.totalOnSeconds;
+  status["peakCurrentA"] = usageStats.peakCurrent;
+  status["totalEnergyWh"] = usageStats.totalEnergyWh;
+  status["alertType"] = alertActive ? "OVER_CURRENT" : "NONE";
   status["room1Fan"] = snapshot.room1Fan;
   status["room1Light"] = snapshot.room1Light;
   status["room2Fan"] = snapshot.room2Fan;
@@ -435,10 +547,6 @@ void cloudTask(void* parameter) {
   }
 }
 
-bool apPasswordIsConfigured() {
-  return AP_PASSWORD[0] != '\0' && strlen(AP_PASSWORD) >= 8 && strcmp(AP_PASSWORD, "CHANGE_ME_LOCALLY") != 0;
-}
-
 void setup() {
   Serial.begin(115200);
   analogReadResolution(12);
@@ -462,6 +570,7 @@ void setup() {
     while (true) delay(1000);
   }
 
+  loadUsageStats();
   WiFi.mode(WIFI_AP_STA);
   if (!WiFi.softAP(AP_SSID, AP_PASSWORD, 1, false, 4)) {
     Serial.println("Could not start the NEXUS local Wi-Fi network.");
@@ -472,11 +581,16 @@ void setup() {
   webServer.on("/api/state", HTTP_GET, sendState);
   webServer.on("/api/relay", HTTP_POST, handleRelayCommand);
   webServer.on("/api/protection/reset", HTTP_POST, handleProtectionReset);
+  webServer.on("/api/health", HTTP_GET, []() {
+    webServer.send(200, "application/json", "{\"status\":\"local-control-ok\",\"localUrl\":\"http://192.168.4.1/\",\"cloudConnected\":" + String(WiFi.status() == WL_CONNECTED && cloudConfigured()) + "}");
+  });
   webServer.onNotFound([]() { webServer.send(404, "application/json", "{\"error\":\"NOT_FOUND\"}"); });
   webServer.begin();
 
+  localControlActive = true;
   Serial.printf("Local Wi-Fi: %s\n", AP_SSID);
   Serial.printf("Local control page: http://%s/\n", WiFi.softAPIP().toString().c_str());
+  Serial.println("Local control is always active. If cloud fails, use http://192.168.4.1/");
   if (cloudConfigured()) {
     WiFi.setAutoReconnect(true);
     WiFi.begin(CLOUD_WIFI_SSID, CLOUD_WIFI_PASSWORD);
@@ -491,8 +605,10 @@ void setup() {
 
 void loop() {
   updateProtection();
+  updateUsageStats();
   updateDisplay();
   webServer.handleClient();
+  if (millis() - lastUsageSaveAtMs > 60000UL) saveUsageStats();
   delay(2);
 }
 
@@ -500,4 +616,3 @@ void loop() {
 
 void setup() { nexusHybrid::setup(); }
 void loop() { nexusHybrid::loop(); }
-*** End Patch

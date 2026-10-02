@@ -1,5 +1,5 @@
 import { Router } from 'express';
-import { IDENTITY_PROMPT, scrubIdentity, GENERIC_ERROR } from '../lib/identity.js';
+import { IDENTITY_PROMPT, scrubIdentity, GENERIC_ERROR, getIdentityResponse } from '../lib/identity.js';
 
 const router = Router();
 
@@ -24,19 +24,41 @@ function looksLikeCodingRequest(text = '') {
   return codeSignals.some((signal) => value.includes(signal));
 }
 
+function getTextContent(content) {
+  if (typeof content === 'string') return content;
+  if (!Array.isArray(content)) return '';
+  return content
+    .filter((part) => part?.type === 'text' && typeof part.text === 'string')
+    .map((part) => part.text)
+    .join('\n');
+}
+
+function addUserInstruction(content, instruction) {
+  if (!Array.isArray(content)) return `${getTextContent(content)}${instruction}`;
+
+  let instructionAdded = false;
+  const parts = content.map((part) => {
+    if (part?.type !== 'text' || instructionAdded) return part;
+    instructionAdded = true;
+    return { ...part, text: `${part.text}${instruction}` };
+  });
+  if (!instructionAdded) parts.unshift({ type: 'text', text: instruction.trim() });
+  return parts;
+}
+
 function buildMessages(messages) {
   const normalizedMessages = messages.map((m) => {
     if (m.role !== 'user') {
       return {
         role: 'assistant',
-        content: m.content,
+        content: getTextContent(m.content),
       };
     }
 
-    const content = String(m.content || '');
+    const content = getTextContent(m.content);
     const finalContent = looksLikeCodingRequest(content)
-      ? content
-      : `${content}\n\nMake it in English.`;
+      ? m.content
+      : addUserInstruction(m.content, '\n\nMake it in English.');
 
     return {
       role: 'user',
@@ -50,38 +72,61 @@ function buildMessages(messages) {
   ];
 }
 
-function getIdentityResponse(messages) {
-  const latestUserMessage = [...messages].reverse().find((message) => message.role === 'user');
-  const text = String(latestUserMessage?.content || '').toLowerCase().trim();
-  if (!text) return null;
+function toGeminiParts(content) {
+  if (typeof content === 'string') return [{ text: content }];
+  if (!Array.isArray(content)) return [{ text: '' }];
 
-  if (/^(who are you|what are you|what is this ai|who is this ai)\??$/.test(text)) {
-    return 'I am Vux AI Studio, your secure assistant for chat, coding help, and creative work.';
-  }
-  if (/\b(who (made|created|built|developed) you|who is your founder|who founded you)\b/.test(text)) {
-    return 'Vux AI Studio was developed by Game Theory Building Studio. The owners are Muhammed Thariq P.S and Gokul S Nair.';
-  }
-  if (/\bwho (are|is) the (co-?founders?|engineering team)\b/.test(text)) {
-    return 'The AI Engineers are Muhammed Thariq P.S and Gokul S Nair.';
-  }
-  return null;
+  return content.flatMap((part) => {
+    if (part?.type === 'text' && typeof part.text === 'string') return [{ text: part.text }];
+    const imageUrl = part?.type === 'image_url' ? part.image_url?.url : '';
+    const imageMatch = typeof imageUrl === 'string'
+      ? imageUrl.match(/^data:(image\/(?:png|jpeg|webp|gif));base64,([A-Za-z0-9+/=]+)$/)
+      : null;
+    return imageMatch ? [{ inlineData: { mimeType: imageMatch[1], data: imageMatch[2] } }] : [];
+  });
 }
 
-function isProviderLimitError(status, payload = {}) {
-  if (status === 429 || status === 503 || status === 500) return true;
-  const text = `${payload?.error?.message || ''} ${payload?.message || ''}`.toLowerCase();
-  return /quota|rate limit|limit reached|temporarily unavailable|overloaded|busy|429|too many requests/i.test(text);
+function extractAssistantText(data) {
+  const content = data?.choices?.[0]?.message?.content;
+  if (typeof content === 'string') return content.trim();
+  if (Array.isArray(content)) {
+    return content.map((part) => typeof part === 'string' ? part : part?.text || '').join('\n').trim();
+  }
+  return '';
+}
+
+async function callHuggingFace(messages, model) {
+  const response = await fetch('https://router.huggingface.co/v1/chat/completions', {
+    method: 'POST',
+    headers: {
+      Authorization: `Bearer ${process.env.HF_TOKEN}`,
+      'Content-Type': 'application/json',
+    },
+    body: JSON.stringify({ model, messages, stream: false }),
+  });
+  const body = await response.text();
+  let data = {};
+  try { data = body ? JSON.parse(body) : {}; } catch { data = {}; }
+
+  if (!response.ok) {
+    const error = new Error(data?.error?.message || data?.error || 'Chat request failed');
+    error.status = response.status;
+    throw error;
+  }
+
+  const text = extractAssistantText(data);
+  if (!text) throw new Error('The chat service returned an empty response.');
+  return text;
 }
 
 async function callGemini(messages) {
-  const contents = messages.map((m) => ({
-    role: m.role === 'assistant' ? 'model' : 'user',
-    parts: [{ text: m.content }],
+  const contents = messages.slice(1).map((message) => ({
+    role: message.role === 'assistant' ? 'model' : 'user',
+    parts: toGeminiParts(message.content),
   }));
-
   const configuredModel = process.env.GEMINI_MODEL || 'gemini-3.6-flash';
   const models = [...new Set([configuredModel, 'gemini-3.6-flash'])];
-  let data;
+  let data = {};
   let response;
 
   for (const model of models) {
@@ -91,29 +136,26 @@ async function callGemini(messages) {
         method: 'POST',
         headers: { 'Content-Type': 'application/json' },
         body: JSON.stringify({
-          systemInstruction: { parts: [{ text: `${IDENTITY_PROMPT}\n\n${FORCE_ENGLISH_INSTRUCTIONS}` }] },
+          systemInstruction: { parts: [{ text: messages[0]?.content || `${IDENTITY_PROMPT}\n\n${FORCE_ENGLISH_INSTRUCTIONS}` }] },
           contents,
         }),
       }
     );
 
-    data = await response.json();
+    const responseText = await response.text();
+    try { data = responseText ? JSON.parse(responseText) : {}; } catch { data = {}; }
     if (response.ok || response.status !== 404) break;
-    console.warn(`[chat] configured model ${model} was not found; trying fallback`);
   }
 
-  if (!response.ok) {
-    const err = new Error(data.error?.message || 'Chat request failed');
-    err.status = response.status;
-    err.payload = data;
-    throw err;
+  if (!response?.ok) {
+    const error = new Error(data.error?.message || 'Chat request failed');
+    error.status = response?.status;
+    throw error;
   }
 
-  const rawText =
-    data.candidates?.[0]?.content?.parts?.map((p) => p.text).join('\n') ||
-    "I couldn't generate a response to that — try rephrasing.";
-
-  return scrubIdentity(rawText);
+  const text = data.candidates?.[0]?.content?.parts?.map((part) => part.text || '').join('\n').trim();
+  if (!text) throw new Error('The chat service returned an empty response.');
+  return text;
 }
 
 // POST /api/chat  { messages: [{ role: 'user'|'assistant', content: string }] }
@@ -123,22 +165,51 @@ router.post('/', async (req, res) => {
     return res.status(400).json({ error: 'messages array is required' });
   }
 
-  const identityResponse = getIdentityResponse(messages);
+  const identityMessages = messages.map((message) => ({
+    ...message,
+    content: getTextContent(message.content),
+  }));
+  const identityResponse = getIdentityResponse(identityMessages);
   if (identityResponse) return res.json({ text: identityResponse });
 
-  if (!process.env.GEMINI_API_KEY) {
-    console.error('[chat] GEMINI_API_KEY is not set on the server');
-    return res.status(500).json({ error: GENERIC_ERROR.chat });
+  const normalizedMessages = buildMessages(messages);
+  const latestUserMessage = [...identityMessages].reverse().find((message) => message.role === 'user');
+  const isCoding = looksLikeCodingRequest(latestUserMessage?.content || '');
+  const hasHuggingFace = Boolean(process.env.HF_TOKEN && process.env.HF_TOKEN !== 'your_huggingface_api_key_here');
+  const hasGemini = Boolean(process.env.GEMINI_API_KEY && process.env.GEMINI_API_KEY !== 'your_gemini_api_key_here');
+  const systemMessage = normalizedMessages[0];
+  const userMessages = normalizedMessages.slice(1);
+  const chatModel = process.env.HF_CHAT_MODEL || 'google/gemma-4-12B-it';
+  const deepSeekModel = process.env.HF_DEEPSEEK_MODEL || 'deepseek-ai/DeepSeek-V3.2';
+  const huggingFaceModels = isCoding
+    ? [...new Set([deepSeekModel, chatModel])]
+    : [...new Set([chatModel, deepSeekModel])];
+
+  let lastError = null;
+  if (hasHuggingFace) {
+    for (const model of huggingFaceModels) {
+      try {
+        const text = await callHuggingFace([systemMessage, ...userMessages], model);
+        return res.json({ text: scrubIdentity(text) });
+      } catch (error) {
+        lastError = error;
+        console.warn('[chat] Hugging Face route failed; trying the next configured service.');
+      }
+    }
   }
 
-  try {
-    const text = await callGemini(messages);
-    return res.json({ text });
-  } catch (err) {
-    console.error('[chat] Gemini failed:', err?.payload || err.message || err);
-    const status = err?.status >= 400 ? err.status : 502;
-    return res.status(status >= 500 ? 502 : status).json({ error: GENERIC_ERROR.chat });
+  if (hasGemini) {
+    try {
+      const text = await callGemini(normalizedMessages);
+      return res.json({ text: scrubIdentity(text) });
+    } catch (error) {
+      lastError = error;
+      console.error('[chat] configured fallback failed:', error?.status || error?.message || 'unknown error');
+    }
   }
+
+  console.error('[chat] no configured service completed the request:', lastError?.status || lastError?.message || 'no credentials configured');
+  return res.status(hasHuggingFace || hasGemini ? 502 : 503).json({ error: GENERIC_ERROR.chat });
 });
 
 export default router;

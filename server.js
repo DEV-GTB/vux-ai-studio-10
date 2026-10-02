@@ -7,6 +7,7 @@ import path from 'path';
 import { fileURLToPath } from 'url';
 
 import chatRouter from './routes/chat.js';
+import visionRouter from './routes/vision.js';
 import imageRouter from './routes/image.js';
 import object3dRouter from './routes/3d.js';
 import terminalRouter from './routes/terminal.js';
@@ -51,7 +52,7 @@ if (process.env.ALLOWED_ORIGIN) {
   app.use(cors({ origin: allowedOrigins }));
 }
 
-app.use(express.json({ limit: '1mb' }));
+app.use(express.json({ limit: '20mb' }));
 
 // Rate limit every /api/* route per IP. Free-tier Gemini quotas are small
 // and shared across all your users — this is what stops one visitor (or
@@ -100,6 +101,7 @@ if (process.env.VERCEL === '1' || process.env.NODE_ENV === 'production') {
 }
 
 app.use('/api/chat', chatRouter);
+app.use('/api/vision', visionRouter);
 app.use('/api/image', imageRouter);
 app.use('/api/3d', object3dRouter);
 app.use('/api/terminal', terminalRouter);

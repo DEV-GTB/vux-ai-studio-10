@@ -90,7 +90,7 @@ function App() {
         </div>
 
         {/* Navigation */}
-        <nav className="flex flex-col gap-1 flex-1 p-4">
+        <nav className="flex flex-col gap-1 flex-1 min-h-0 overflow-y-auto p-4">
           <button
             onClick={() => { setCurrentPage('home'); setMobileMenuOpen(false); }}
             className={`flex items-center gap-3 px-4 py-3 rounded-lg transition-all ${

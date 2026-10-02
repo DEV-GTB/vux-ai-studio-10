@@ -4,17 +4,55 @@ import { apiUrl } from '../lib/api.js'
 export function Image({ setCurrentPage: _setCurrentPage, username: _username }) {
   const [prompt, setPrompt] = useState('')
   const [generatedImage, setGeneratedImage] = useState(null)
+  const [generatedImageType, setGeneratedImageType] = useState('image/png')
   const [isGenerating, setIsGenerating] = useState(false)
   const [progress, setProgress] = useState(0)
   const [imageHistory, setImageHistory] = useState([])
   const [selectedImage, setSelectedImage] = useState(null)
+  const [lightboxOpen, setLightboxOpen] = useState(false)
+  const [imageZoom, setImageZoom] = useState(1)
   const [aspectRatio, setAspectRatio] = useState('1:1')
   const [quality, setQuality] = useState('high')
   const [stylePreset, setStylePreset] = useState('photorealistic')
   const [showSettings, setShowSettings] = useState(false)
   const [errorMessage, setErrorMessage] = useState('')
+  const [visionImageUrl, setVisionImageUrl] = useState('')
+  const [visionQuestion, setVisionQuestion] = useState('What objects are visible in this image?')
+  const [visionReply, setVisionReply] = useState('')
+  const [visionError, setVisionError] = useState('')
+  const [isAnalyzingImage, setIsAnalyzingImage] = useState(false)
   const fileInputRef = useRef(null)
   const canvasRef = useRef(null)
+  const imageObjectUrls = useRef(new Set())
+
+  useEffect(() => () => {
+    imageObjectUrls.current.forEach((url) => URL.revokeObjectURL(url))
+    imageObjectUrls.current.clear()
+  }, [])
+
+  useEffect(() => {
+    const retainedUrls = new Set([
+      generatedImage,
+      selectedImage,
+      ...imageHistory.map((image) => image.data),
+    ].filter((value) => typeof value === 'string' && value.startsWith('blob:')))
+
+    imageObjectUrls.current.forEach((url) => {
+      if (!retainedUrls.has(url)) {
+        URL.revokeObjectURL(url)
+        imageObjectUrls.current.delete(url)
+      }
+    })
+  }, [generatedImage, selectedImage, imageHistory])
+
+  useEffect(() => {
+    if (!lightboxOpen) return
+    const closeOnEscape = (event) => {
+      if (event.key === 'Escape') setLightboxOpen(false)
+    }
+    window.addEventListener('keydown', closeOnEscape)
+    return () => window.removeEventListener('keydown', closeOnEscape)
+  }, [lightboxOpen])
 
   // Generate particle effects
   const particles = isGenerating ? Array.from({ length: 20 }, (_, i) => ({
@@ -105,18 +143,25 @@ export function Image({ setCurrentPage: _setCurrentPage, username: _username }) 
       clearInterval(progressInterval)
 
       if (!response.ok) {
-        const errorData = await response.json()
+        const errorData = await response.json().catch(() => ({}))
         console.error('Image generation error:', errorData)
-        throw new Error(errorData.error || errorData.details || 'Failed to generate image')
+        throw new Error(errorData.error || 'Failed to generate image')
       }
 
-      const data = await response.json()
+      const imageBlob = await response.blob()
+      if (!imageBlob.type.startsWith('image/')) {
+        throw new Error('The image service returned an unsupported file.')
+      }
+      const imageUrl = URL.createObjectURL(imageBlob)
+      imageObjectUrls.current.add(imageUrl)
       setProgress(100)
-      setGeneratedImage(data.image)
+      setGeneratedImage(imageUrl)
+      setGeneratedImageType(imageBlob.type)
 
       const newImage = {
         id: Date.now(),
-        data: data.image,
+        data: imageUrl,
+        mimeType: imageBlob.type,
         prompt,
         timestamp: new Date().toLocaleString(),
         aspectRatio,
@@ -134,6 +179,28 @@ export function Image({ setCurrentPage: _setCurrentPage, username: _username }) 
     }
   }
 
+  const analyzeImage = async () => {
+    if (!visionImageUrl.trim() || !visionQuestion.trim() || isAnalyzingImage) return
+    setIsAnalyzingImage(true)
+    setVisionError('')
+    setVisionReply('')
+
+    try {
+      const response = await fetch(apiUrl('/api/vision'), {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ imageUrl: visionImageUrl.trim(), message: visionQuestion.trim() }),
+      })
+      const data = await response.json().catch(() => ({}))
+      if (!response.ok) throw new Error(data.error || 'Image understanding could not complete.')
+      setVisionReply(data.reply || 'No response received.')
+    } catch (error) {
+      setVisionError(error.message || 'Image understanding could not complete.')
+    } finally {
+      setIsAnalyzingImage(false)
+    }
+  }
+
   const handleImageUpload = (e) => {
     const file = e.target.files[0]
     if (file) {
@@ -145,11 +212,12 @@ export function Image({ setCurrentPage: _setCurrentPage, username: _username }) 
     }
   }
 
-  const downloadImage = (imageData, filename = 'generated-image.png') => {
+  const downloadImage = (imageData, mimeType = 'image/png') => {
     try {
       const link = document.createElement('a')
       link.href = imageData
-      link.download = filename
+      const extension = mimeType.split('/')[1]?.replace('jpeg', 'jpg') || 'png'
+      link.download = `generated-image.${extension}`
       document.body.appendChild(link)
       link.click()
       document.body.removeChild(link)
@@ -172,7 +240,7 @@ export function Image({ setCurrentPage: _setCurrentPage, username: _username }) 
             <span className="text-xl wave-animation">🎨</span>
           </div>
           <h1 className="text-2xl font-display font-bold text-white">
-            FLUX.1 Image Generator
+            AI Image Generator
           </h1>
         </div>
         <div className="flex items-center gap-2 lg:gap-4">
@@ -329,6 +397,42 @@ export function Image({ setCurrentPage: _setCurrentPage, username: _username }) 
             </div>
 
             {/* Local preview display */}
+                        <section className="bg-forge-surface border border-forge-border rounded-2xl p-6 space-y-4">
+                          <div>
+                            <h2 className="text-lg font-display font-semibold">ASK ABOUT AN IMAGE</h2>
+                            <p className="mt-1 text-sm text-forge-textMuted">Use a public HTTPS image URL to ask a question about its contents.</p>
+                          </div>
+                          <label className="block text-xs font-medium text-forge-textMuted" htmlFor="vision-image-url">Image URL</label>
+                          <input
+                            id="vision-image-url"
+                            type="url"
+                            value={visionImageUrl}
+                            onChange={(event) => setVisionImageUrl(event.target.value)}
+                            placeholder="https://example.com/image.jpg"
+                            className="w-full rounded-lg border border-forge-border bg-forge-surfaceLow px-3 py-2 text-sm text-forge-text placeholder-forge-textDim focus:border-forge-primary focus:outline-none"
+                            disabled={isAnalyzingImage}
+                          />
+                          <label className="block text-xs font-medium text-forge-textMuted" htmlFor="vision-image-question">Question</label>
+                          <textarea
+                            id="vision-image-question"
+                            value={visionQuestion}
+                            onChange={(event) => setVisionQuestion(event.target.value)}
+                            rows={2}
+                            className="w-full resize-y rounded-lg border border-forge-border bg-forge-surfaceLow px-3 py-2 text-sm text-forge-text focus:border-forge-primary focus:outline-none"
+                            disabled={isAnalyzingImage}
+                          />
+                          <button
+                            onClick={analyzeImage}
+                            disabled={isAnalyzingImage || !visionImageUrl.trim() || !visionQuestion.trim()}
+                            className="px-4 py-2 bg-forge-primary text-black text-sm font-semibold disabled:cursor-not-allowed disabled:opacity-40"
+                          >
+                            {isAnalyzingImage ? 'Analyzing image...' : 'Ask about image'}
+                          </button>
+                          {visionError && <p className="rounded-lg border border-red-400/30 bg-red-500/10 px-3 py-2 text-sm text-red-200" role="alert">{visionError}</p>}
+                          {visionReply && <p className="whitespace-pre-wrap rounded-lg border border-forge-border bg-forge-surfaceLow p-3 text-sm leading-6 text-forge-text" aria-live="polite">{visionReply}</p>}
+                        </section>
+
+                        {/* Local preview display */}
             {generatedImage && (
               <div className="bg-forge-surface border border-forge-border rounded-2xl p-6 relative overflow-hidden scale-in">
                 <div className="absolute inset-0 overflow-hidden pointer-events-none">
@@ -340,7 +444,7 @@ export function Image({ setCurrentPage: _setCurrentPage, username: _username }) 
                     <h2 className="text-lg font-display font-semibold">GENERATED IMAGE</h2>
                     <div className="flex items-center gap-2">
                       <button
-                        onClick={() => downloadImage(generatedImage)}
+                        onClick={() => downloadImage(generatedImage, generatedImageType)}
                         className="px-3 py-1.5 bg-forge-surfaceLow border border-forge-border rounded-lg text-sm hover:bg-forge-surfaceHigh transition-all"
                       >
                         📥 Download
@@ -358,14 +462,15 @@ export function Image({ setCurrentPage: _setCurrentPage, username: _username }) 
                     <img 
                       src={generatedImage} 
                       alt="Generated" 
-                      className="w-full h-auto cursor-pointer image-reveal hover:scale-105 transition-transform duration-300"
+                      onClick={() => { setImageZoom(1); setLightboxOpen(true) }}
+                      className="w-full h-auto cursor-zoom-in image-reveal hover:scale-[1.01] transition-transform duration-300"
                     />
                     <div className="absolute inset-0 bg-gradient-to-t from-black/80 via-transparent to-transparent opacity-0 group-hover:opacity-100 transition-opacity duration-300 flex items-end p-4">
                       <p className="text-white text-sm">{prompt}</p>
                     </div>
                     <div className="absolute top-2 right-2 flex gap-2 opacity-0 group-hover:opacity-100 transition-opacity duration-300">
                       <button
-                        onClick={() => downloadImage(generatedImage)}
+                        onClick={() => downloadImage(generatedImage, generatedImageType)}
                         className="w-8 h-8 bg-black/50 backdrop-blur-sm rounded-lg flex items-center justify-center hover:bg-black/70 transition-all"
                       >
                         📥
@@ -392,7 +497,7 @@ export function Image({ setCurrentPage: _setCurrentPage, username: _username }) 
                       key={image.id}
                       className="relative group cursor-pointer scale-in"
                       style={{ animationDelay: `${index * 0.1}s` }}
-                      onClick={() => setGeneratedImage(image.data)}
+                      onClick={() => { setGeneratedImage(image.data); setGeneratedImageType(image.mimeType || 'image/png') }}
                     >
                       <img 
                         src={image.data} 
@@ -548,10 +653,6 @@ export function Image({ setCurrentPage: _setCurrentPage, username: _username }) 
                   <span className="font-semibold">{imageHistory.length}</span>
                 </div>
                 <div className="flex justify-between items-center">
-                  <span className="text-sm text-forge-textMuted">Model</span>
-                  <span className="font-semibold text-xs">FLUX.1-schnell</span>
-                </div>
-                <div className="flex justify-between items-center">
                   <span className="text-sm text-forge-textMuted">Quality</span>
                   <span className="font-semibold text-xs capitalize">{quality}</span>
                 </div>
@@ -568,6 +669,25 @@ export function Image({ setCurrentPage: _setCurrentPage, username: _username }) 
           </div>
         </div>
       </div>
+
+      {/* Custom Canvas for Image Processing */}
+      {lightboxOpen && generatedImage && (
+        <div className="fixed inset-0 z-[100] flex flex-col bg-black/95 p-4 backdrop-blur-md" role="dialog" aria-modal="true" aria-label="Image preview">
+          <div className="flex items-center justify-between gap-3 border-b border-white/10 pb-3">
+            <span className="truncate text-sm text-white">{prompt || 'Generated image'}</span>
+            <div className="flex shrink-0 items-center gap-2">
+              <button onClick={() => setImageZoom((zoom) => Math.max(0.5, +(zoom - 0.25).toFixed(2)))} className="h-9 w-9 border border-white/15 text-white hover:bg-white/10" title="Zoom out" aria-label="Zoom out">-</button>
+              <button onClick={() => setImageZoom(1)} className="h-9 min-w-12 border border-white/15 px-2 text-xs text-white hover:bg-white/10" title="Reset zoom">{Math.round(imageZoom * 100)}%</button>
+              <button onClick={() => setImageZoom((zoom) => Math.min(3, +(zoom + 0.25).toFixed(2)))} className="h-9 w-9 border border-white/15 text-white hover:bg-white/10" title="Zoom in" aria-label="Zoom in">+</button>
+              <button onClick={() => downloadImage(generatedImage, generatedImageType)} className="h-9 border border-white/15 px-3 text-sm text-white hover:bg-white/10" title="Download image">Download</button>
+              <button onClick={() => setLightboxOpen(false)} className="h-9 w-9 border border-white/15 text-white hover:bg-white/10" title="Close preview" aria-label="Close preview">×</button>
+            </div>
+          </div>
+          <div className="flex min-h-0 flex-1 items-center justify-center overflow-auto py-4">
+            <img src={generatedImage} alt="Full-size generated image" className="max-h-full max-w-full object-contain transition-transform duration-200" style={{ transform: `scale(${imageZoom})` }} />
+          </div>
+        </div>
+      )}
 
       {/* Custom Canvas for Image Processing */}
       <canvas ref={canvasRef} className="hidden" />
