@@ -2,11 +2,44 @@ import { useState, useEffect } from 'react'
 import { Landing, Home, HomeController, Chat, Studio, Image, Object3D, Settings, Help, Username, Terms } from './pages'
 import './index.css'
 
+const PAGE_PATHS = {
+  landing: '/',
+  home: '/home',
+  'home-controller': '/home-controller',
+  chat: '/chat',
+  studio: '/studio',
+  image: '/image-generator',
+  object3d: '/3d-object-generator',
+  settings: '/settings',
+  help: '/help',
+  username: '/login',
+  terms: '/terms',
+}
+
+const PATH_PAGES = {
+  '/home': 'home',
+  '/home-controller': 'home-controller',
+  '/chat': 'chat',
+  '/studio': 'studio',
+  '/image-generator': 'image',
+  '/image': 'image',
+  '/3d-object-generator': 'object3d',
+  '/object3d': 'object3d',
+  '/settings': 'settings',
+  '/help': 'help',
+  '/login': 'username',
+  '/terms': 'terms',
+}
+
+function pageFromPath(pathname) {
+  const normalizedPath = pathname.replace(/\/+$/, '').toLowerCase() || '/'
+  return PATH_PAGES[normalizedPath] || null
+}
+
 function App() {
-  const [currentPage, setCurrentPage] = useState(() => {
-    if (window.location.pathname === '/login') return 'username'
-    if (window.location.pathname === '/terms') return 'terms'
-    if (window.location.pathname === '/home-controller') return 'home-controller'
+  const [currentPage, setCurrentPageState] = useState(() => {
+    const pathPage = pageFromPath(window.location.pathname)
+    if (pathPage) return pathPage
     return localStorage.getItem('vux_onboarded') ? 'home' : 'landing'
   })
   const [username, _setUsername] = useState(localStorage.getItem('vux_username') || 'Developer')
@@ -16,14 +49,30 @@ function App() {
   const [sidebarCollapsed, setSidebarCollapsed] = useState(false)
   const [mobileMenuOpen, setMobileMenuOpen] = useState(false)
 
+  const setCurrentPage = (page) => {
+    setCurrentPageState(page)
+    const path = PAGE_PATHS[page]
+    if (path && window.location.pathname !== path) {
+      window.history.pushState({}, '', path)
+    }
+  }
+
+  useEffect(() => {
+    const handlePopState = () => {
+      const pathPage = pageFromPath(window.location.pathname)
+      setCurrentPageState(pathPage || (isAuthenticated ? 'home' : 'landing'))
+    }
+
+    window.addEventListener('popstate', handlePopState)
+    return () => window.removeEventListener('popstate', handlePopState)
+  }, [isAuthenticated])
+
   const handleGetStarted = () => {
     setCurrentPage('username')
-    window.history.pushState({}, '', '/login')
   }
 
   const handleTerms = () => {
     setCurrentPage('terms')
-    window.history.pushState({}, '', '/terms')
   }
 
   const handleUsernameContinue = (value, vibe) => {
@@ -38,7 +87,7 @@ function App() {
   const renderPage = () => {
     if (!isAuthenticated) {
       if (currentPage === 'username') return <Username onContinue={handleUsernameContinue} />
-      if (currentPage === 'terms') return <Terms onBack={() => { setCurrentPage('landing'); window.history.pushState({}, '', '/') }} />
+      if (currentPage === 'terms') return <Terms onBack={() => setCurrentPage('landing')} />
       return <Landing onGetStarted={handleGetStarted} onTerms={handleTerms} />
     }
 
@@ -51,7 +100,7 @@ function App() {
       case 'object3d': return <Object3D setCurrentPage={setCurrentPage} username={username} />
       case 'settings': return <Settings setCurrentPage={setCurrentPage} username={username} />
       case 'help': return <Help setCurrentPage={setCurrentPage} username={username} />
-      case 'terms': return <Terms onBack={() => { setCurrentPage('home'); window.history.pushState({}, '', '/') }} />
+      case 'terms': return <Terms onBack={() => setCurrentPage('home')} />
       default: return <Home setCurrentPage={setCurrentPage} username={username} />
     }
   }
@@ -116,7 +165,7 @@ function App() {
             {!sidebarCollapsed && <span className="font-medium">Chat</span>}
           </button>
           <button
-            onClick={() => { setCurrentPage('home-controller'); window.history.pushState({}, '', '/home-controller'); setMobileMenuOpen(false); }}
+            onClick={() => { setCurrentPage('home-controller'); setMobileMenuOpen(false); }}
             className={`flex items-center gap-3 px-4 py-3 rounded-lg transition-all ${
               currentPage === 'home-controller'
                 ? 'bg-forge-techLight text-forge-tech border-l-2 border-forge-tech'
