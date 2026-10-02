@@ -84,6 +84,19 @@ test('ordinary chat prefers the configured Hugging Face chat route', async () =>
   assert.match(systemPrompt, /Vux AI Studio/);
 });
 
+test('identity questions return immediately without calling an AI provider', async () => {
+  globalThis.fetch = async () => {
+    throw new Error('Identity response unexpectedly called an upstream provider.');
+  };
+
+  const response = await ask([{ role: 'user', content: 'Who is Safna?' }]);
+  const body = await response.json();
+
+  assert.equal(response.status, 200);
+  assert.match(body.text, /Electrical Engineer and Prompt Engineer/);
+  assert.equal(body.text.split(/[.!?]+/).filter(Boolean).length, 6);
+});
+
 test('coding requests prefer the configured DeepSeek route', async () => {
   let requestedModel = '';
   globalThis.fetch = async (_url, options) => {

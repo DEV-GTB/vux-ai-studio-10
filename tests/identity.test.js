@@ -51,3 +51,11 @@ test('Aisha and Aachu resolve to the prompt engineering and design profile', () 
     assert.ok(answer.split(/[.!?]+/).filter(Boolean).length >= 5);
   }
 });
+
+test('Jubi and Safna resolve to the six-sentence electrical and prompt engineering profile', () => {
+  for (const name of ['Jubi', 'Safna']) {
+    const answer = ask(`Who is ${name}?`);
+    assert.match(answer, /Electrical Engineer and Prompt Engineer/);
+    assert.equal(answer.split(/[.!?]+/).filter(Boolean).length, 6);
+  }
+});
