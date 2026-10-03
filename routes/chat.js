@@ -229,7 +229,7 @@ router.post('/', async (req, res) => {
       return res.json({ text: scrubIdentity(text) });
     } catch (error) {
       lastError = error;
-      console.warn('[chat] DeepSeek route failed; trying the next configured service.');
+      console.warn(`[chat] DeepSeek route failed with HTTP ${error?.status || 'provider-error'}; trying the next configured service.`);
     }
   }
 

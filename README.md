@@ -50,9 +50,9 @@ The browser sends API requests to the configured backend URL. Provider API keys 
 
 For direct, nearby phone-to-ESP32 control with no backend, use the separate [local ESP32 control sketch](esp32/nexus_local_control/nexus_local_control.ino) and follow [ESP32_LOCAL_CONTROL.md](ESP32_LOCAL_CONTROL.md). This runs its own local page at `http://192.168.4.1/`; it is separate from the cloud Render/Vercel controller.
 
-For local Wi-Fi control plus optional Render telemetry/website commands in one firmware, use [the hybrid ESP32 sketch](esp32/nexus_hybrid_control/nexus_hybrid_control.ino) and follow [ESP32_HYBRID_SETUP.md](ESP32_HYBRID_SETUP.md). Copy `nexus_secrets.example.h` to the ignored `nexus_secrets.h` and put real device/network credentials only in that local file. The AI remains in the Vercel/Render website backend; the ESP32 only relays telemetry and device commands.
+For two-room local Wi-Fi control with an OLED status display, use [the local-only hybrid ESP32 sketch](esp32/nexus_hybrid_control/nexus_hybrid_control.ino) and follow [ESP32_HYBRID_SETUP.md](ESP32_HYBRID_SETUP.md). It starts the `NEXUS-LOCAL` access point and does not connect to Render. The website's Home Controller has a shortcut that opens the ESP32 page in a separate tab.
 
-For the beginner setup that connects an ESP32 through a phone hotspot to Render, including two-room fan/light controls, follow [ESP32_CLOUD_SETUP.md](ESP32_CLOUD_SETUP.md). The cloud bridge keeps the latest snapshot and pending commands in memory; local device protection remains authoritative.
+The older server-connected firmware remains in the repository as a separate legacy option. Do not use [ESP32_CLOUD_SETUP.md](ESP32_CLOUD_SETUP.md) for the local-only hybrid setup above.
 
 For a local-only device link, the Home Controller can use `/api/v1/iot/esp32/status`; the Node server polls the firmware's `/api/telemetry` endpoint and optionally `/api/diag` on the same reachable LAN. For cloud telemetry over a phone hotspot, use the authenticated `/api/device/status` upload and `/api/device/state` dashboard endpoints described in [ESP32_CLOUD_SETUP.md](ESP32_CLOUD_SETUP.md). The browser never contacts the ESP32 directly.
 
@@ -62,7 +62,7 @@ For an all-in-one Vercel deployment, the React website and Node API can be deplo
 
 For an all-in-one Vercel deployment, import this repository into Vercel with the repository root as the project root. The checked-in `vercel.json` builds the React app and routes `/api/*` through the serverless Express backend. Add `GEMINI_API_KEY` as a server-side environment variable in Vercel and redeploy; never add provider secrets to a `VITE_*` variable. The public site and AI API will work, but live device status stays unavailable in Vercel until an authenticated outbound ESP32-to-cloud bridge is implemented. For production AI abuse protection, configure Vercel Firewall rate limits or a shared rate-limit store; per-instance Express limits are not a global serverless quota.
 
-The supplied FW 1.2 telemetry includes ACS712 current validity, room sensor state, relay state, protection state, and raw diagnostics. Voltage is marked unavailable by that firmware. The cloud dashboard must not infer or replace invalid readings.
+The local-only hybrid firmware reports room sensor input values and commanded relay states to its local page. It has no voltage/current sensor, no load feedback, and no current-based overload protection; a relay state cannot confirm that a load is powered or that its wiring is intact.
 
 ## Branding
 

@@ -31,10 +31,16 @@ test('hosted mode blocks command execution and project mutation endpoints', asyn
     headers: { 'Content-Type': 'application/json' },
     body: JSON.stringify({ issues: ['Dependencies not installed'] }),
   });
+  const workspaceWrite = await fetch(`${baseUrl}/api/workspace/file`, {
+    method: 'POST',
+    headers: { 'Content-Type': 'application/json' },
+    body: JSON.stringify({ path: 'test.txt', content: 'nope', mode: 'create' }),
+  });
 
   assert.equal(terminal.status, 403);
   assert.equal(projectRun.status, 403);
   assert.equal(projectFix.status, 403);
+  assert.equal(workspaceWrite.status, 403);
 });
 
 test('hosted mode refuses the ESP32 private access-point URL', async () => {

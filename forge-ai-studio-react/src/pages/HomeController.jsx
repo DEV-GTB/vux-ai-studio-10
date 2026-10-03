@@ -1,5 +1,5 @@
 import { useEffect, useMemo, useRef, useState } from 'react'
-import { buildAiContext, calculateSystemPower } from '../lib/nexusHomeController.js'
+import { buildAiContext } from '../lib/nexusHomeController.js'
 import { apiUrl } from '../lib/api.js'
 import './HomeController.css'
 
@@ -9,15 +9,6 @@ function getTimestampMs(value) {
   if (typeof value === 'number') return value < 1e12 ? value * 1000 : value
   const parsed = Date.parse(value)
   return Number.isFinite(parsed) ? parsed : null
-}
-
-function formatAge(value) {
-  const timestamp = getTimestampMs(value)
-  if (!timestamp) return 'Waiting for first device snapshot'
-  const seconds = Math.max(0, Math.floor((Date.now() - timestamp) / 1000))
-  if (seconds < 2) return 'Updated just now'
-  if (seconds < 60) return `Updated ${seconds}s ago`
-  return `Updated ${Math.floor(seconds / 60)}m ago`
 }
 
 function MetricCard({ label, value, unit, detail, tone = 'lime' }) {
@@ -94,12 +85,9 @@ function Skeleton() {
 
 export function HomeController({ setCurrentPage }) {
   const [device, setDevice] = useState(null)
-  const [deviceEndpoint, setDeviceEndpoint] = useState('http://192.168.4.1')
-  const [connection, setConnection] = useState('CONNECTING')
+  const [connection, setConnection] = useState('LOCAL ONLY')
   const [error, setError] = useState('')
   const [accessCode, setAccessCode] = useState('')
-  const [accessCodeInput, setAccessCodeInput] = useState('')
-  const [accessCodeError, setAccessCodeError] = useState('')
   const [pendingControl, setPendingControl] = useState(null)
   const [controlMessage, setControlMessage] = useState('')
   const [lastRefresh, setLastRefresh] = useState(null)
@@ -126,12 +114,12 @@ export function HomeController({ setCurrentPage }) {
       try {
         const response = await fetch(STATUS_URL, {
           headers: { Accept: 'application/json', 'X-App-Access-Code': accessCode },
+          cache: 'no-store',
           signal: controller.signal,
         })
         const payload = await response.json().catch(() => ({}))
         if (response.status === 401) {
           setAccessCode('')
-          setAccessCodeError('That access code was not accepted. Check it and try again.')
           return
         }
         if (!response.ok) throw new Error(payload.message || `Device bridge returned HTTP ${response.status}.`)
@@ -139,7 +127,6 @@ export function HomeController({ setCurrentPage }) {
         if (!active) return
         hasDeviceRef.current = true
         setDevice(payload.device)
-        setDeviceEndpoint(payload.source?.endpoint || 'Cloud HTTPS API')
         const ageMs = Date.now() - (getTimestampMs(payload.receivedAt) || 0)
         const isStale = ageMs > 30000
         setConnection(isStale ? 'STALE' : 'LIVE')
@@ -163,10 +150,6 @@ export function HomeController({ setCurrentPage }) {
     }
   }, [accessCode, refreshSignal])
 
-  const system = device?.telemetry?.system || {}
-  const voltage = system.voltage ?? null
-  const current = system.current ?? null
-  const power = calculateSystemPower(voltage, current)
   const rooms = device?.rooms || []
   const pendingRoom = pendingControl ? rooms.find((item) => Number(item.roomId) === pendingControl.roomId) : null
   const pendingActualState = pendingControl
@@ -271,8 +254,7 @@ export function HomeController({ setCurrentPage }) {
       userQuestion: aiQuestion,
       deviceState: { status: device.status, protection },
       event: alertItems[0] || {},
-      recentTelemetry: { voltage, current, power, timestamp: device.telemetry?.timestamp },
-      sensorQuality: { voltage: system.voltageQuality, current: system.currentQuality },
+      recentTelemetry: { timestamp: device.telemetry?.timestamp },
       protectionState: device.protection || {},
       configuration: { source: 'ESP32_HTTP_READ_ONLY', sequence: device.sequence, uptime },
     })
@@ -318,7 +300,6 @@ export function HomeController({ setCurrentPage }) {
 
       if (response.status === 401) {
         setAccessCode('')
-        setAccessCodeError('That access code was not accepted. Check it and try again.')
         return
       }
       if (!response.ok) throw new Error(payload.message || payload.error || `Command request failed (${response.status}).`)
@@ -333,14 +314,6 @@ export function HomeController({ setCurrentPage }) {
   const isInitialLoading = !device && connection === 'CONNECTING'
   const deviceName = device?.name || 'NEXUS ESP32'
 
-  function connectDashboard(event) {
-    event.preventDefault()
-    if (!accessCodeInput) return
-    setAccessCodeError('')
-    setAccessCode(accessCodeInput)
-    setAccessCodeInput('')
-  }
-
   return (
     <div className="hc-page">
       <header className="hc-header">
@@ -348,6 +321,7 @@ export function HomeController({ setCurrentPage }) {
           <div className="hc-brandline"><span className="hc-brand-mark">N</span><span>VUX AI STUDIO</span><span className="hc-brand-divider">/</span><span>FIELD SYSTEMS</span></div>
           <div className="hc-header-actions">
             <span className={`hc-live-badge ${connection === 'LIVE' ? 'is-live' : ''}`}><i />{connection}</span>
+            <a className="hc-local-link" href="http://192.168.4.1/" target="_blank" rel="noopener noreferrer" title="Open ESP32 local controls in a new tab">ESP32 LOCAL ↗</a>
             <button type="button" className="hc-icon-button" onClick={() => setRefreshSignal((value) => value + 1)} title="Refresh now" aria-label="Refresh now">↻</button>
             <button type="button" className="hc-back-button" onClick={() => setCurrentPage('home')}>← <span>Studio</span></button>
           </div>
@@ -359,23 +333,20 @@ export function HomeController({ setCurrentPage }) {
           <div>
             <p className="hc-eyebrow">NEXUS / HOME CONTROL / 01</p>
             <h1>Home Controller<span className="hc-title-period">.</span></h1>
-            <p className="hc-subtitle">Live device telemetry, link health, and protected output state.</p>
+            <p className="hc-subtitle">Live device telemetry, link health, and relay output state.</p>
           </div>
           <div className="hc-source">
-            <span className="hc-source-label">DEVICE BRIDGE</span>
-            <span className="hc-source-address">{deviceEndpoint}</span>
-            <span className="hc-source-refresh">{formatAge(lastRefresh)}</span>
+            <span className="hc-source-label">LOCAL ESP32</span>
+            <a className="hc-source-address" href="http://192.168.4.1/" target="_blank" rel="noopener noreferrer">http://192.168.4.1</a>
+            <span className="hc-source-refresh">OPENS IN A NEW TAB</span>
           </div>
         </section>
 
-        {!accessCode ? <section className="hc-panel hc-ai-panel" aria-labelledby="hc-access-title">
-          <div className="hc-panel-heading"><div><span className="hc-section-tag">PRIVATE DEVICE DATA</span><h2 id="hc-access-title">Dashboard access</h2></div></div>
-          <form onSubmit={connectDashboard} className="hc-ai-form">
-            <label className="hc-sr-only" htmlFor="hc-access-code">Dashboard access code</label>
-            <input id="hc-access-code" type="password" autoComplete="current-password" value={accessCodeInput} onChange={(event) => setAccessCodeInput(event.target.value)} placeholder="Enter dashboard access code" required />
-            <button type="submit">Connect <span aria-hidden="true">↗</span></button>
-          </form>
-          {accessCodeError ? <p className="hc-ai-error" role="alert">{accessCodeError}</p> : null}
+        {!accessCode ? <section className="hc-panel hc-ai-panel hc-local-panel" aria-labelledby="hc-access-title">
+          <div className="hc-panel-heading"><div><span className="hc-section-tag">LOCAL NETWORK / NO SERVER</span><h2 id="hc-access-title">Open ESP32 controls</h2></div></div>
+          <p className="hc-subtitle">Connect this device to the <strong>NEXUS-LOCAL</strong> Wi-Fi network first. The control page opens separately, so this website stays open.</p>
+          <a className="hc-local-launch" href="http://192.168.4.1/" target="_blank" rel="noopener noreferrer">Open local controller <span aria-hidden="true">↗</span></a>
+          <p className="hc-panel-footnote">No cloud status or remote relay commands are used in local mode. Current and voltage monitoring are not installed.</p>
         </section> : null}
 
         {error ? <div className="hc-error" role="alert"><span className="hc-error-icon">!</span><span>{error}</span><button type="button" onClick={() => setRefreshSignal((value) => value + 1)}>Retry</button></div> : null}
@@ -396,14 +367,12 @@ export function HomeController({ setCurrentPage }) {
               <div className="hc-device-stats">
                 <div><span>SEQUENCE</span><strong>{device?.sequence ?? '—'}</strong></div>
                 <div><span>UPTIME</span><strong>{uptime === null ? '—' : `${uptime}s`}</strong></div>
-                <div><span>PROTECTION</span><strong className={protection === 'PROTECTED' ? 'hc-danger-text' : ''}>{protection}</strong></div>
+                <div><span>DEVICE STATE</span><strong className={protection === 'PROTECTED' ? 'hc-danger-text' : ''}>{protection}</strong></div>
               </div>
             </section>
 
-            <section className="hc-metrics-grid" aria-label="System measurements">
-              <MetricCard label="System voltage" value={voltage === null ? null : Number(voltage).toFixed(2)} unit="V" detail={system.voltageQuality || 'AWAITING SENSOR'} tone="lime" />
-              <MetricCard label="System current" value={current === null ? null : Number(current).toFixed(3)} unit="A" detail={`ACS712 · ${system.currentQuality || 'AWAITING SENSOR'}`} tone="blue" />
-              <MetricCard label="Calculated power" value={power === null ? null : Number(power).toFixed(2)} unit="W" detail={power === null ? 'REQUIRES VOLTAGE + CURRENT' : 'V × A'} tone="amber" />
+            <section className="hc-metrics-grid hc-monitoring-grid" aria-label="System monitoring">
+              <MetricCard label="Current monitoring" value="NOT INSTALLED" detail="No current sensor connected" tone="blue" />
             </section>
 
             <section className="hc-content-grid">
@@ -429,7 +398,7 @@ export function HomeController({ setCurrentPage }) {
                     )
                   })}
                 </div>
-                <p className="hc-panel-footnote">ON commands are blocked unless the latest device report is safe. The ESP32 performs its own protection check before changing a relay. OFF commands remain available while connected.</p>
+                <p className="hc-panel-footnote">ON commands require a fresh device report with an available state. This controller does not provide current-based overload protection. OFF commands remain available while connected.</p>
                 {controlMessage ? <p className="hc-control-message" role="status">{controlMessage}</p> : null}
               </div>
 
@@ -447,7 +416,6 @@ export function HomeController({ setCurrentPage }) {
                 <div className="hc-link-footer"><span>Last device timestamp</span><strong>{device?.telemetry?.timestamp ? new Date(getTimestampMs(device.telemetry.timestamp) || 0).toLocaleTimeString() : 'NOT REPORTED'}</strong></div>
                 {device?.diagnostics ? <div className="hc-diag-grid" aria-label="Raw sensor diagnostics">
                   {['r1', 'r2', 'r3'].map((key, index) => <div key={key}><span>ROOM {index + 1} RAW</span><strong>{device.diagnostics[key]?.raw ?? '—'}</strong></div>)}
-                  <div><span>ACS712 ADC</span><strong>{device.diagnostics.acsRaw ?? '—'}</strong></div>
                 </div> : null}
               </div>
             </section>

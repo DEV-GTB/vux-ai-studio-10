@@ -104,7 +104,7 @@ function parseAiFileAction(text) {
   for (const candidate of [block?.[1], source].filter(Boolean)) {
     try {
       const value = JSON.parse(candidate)
-      if (['edit', 'create', 'delete', 'answer'].includes(value?.action)) return value
+      if (['edit', 'create', 'delete', 'create_folder', 'delete_folder', 'answer'].includes(value?.action)) return value
     } catch {
       // Non-JSON code replies use the existing active-file edit flow.
     }
@@ -115,8 +115,20 @@ function parseAiFileAction(text) {
 function isSafeWorkspaceFileName(name) {
   return typeof name === 'string' && name.trim().length > 0 && name.length <= 180 &&
     !name.startsWith('/') && !name.startsWith('\\') &&
-    !name.split(/[\\/]/).some((part) => part === '..' || part === '.') &&
+    !name.split(/[\\/]/).some((part) => !part || part === '..' || part === '.') &&
     !/[<>:"|?*\0]/.test(name)
+}
+
+async function requestWorkspace(endpoint, method = 'GET', body) {
+  const response = await fetch(apiUrl(`/api/workspace${endpoint}`), {
+    method,
+    headers: body ? { 'Content-Type': 'application/json' } : undefined,
+    body: body ? JSON.stringify(body) : undefined,
+    cache: 'no-store',
+  })
+  const result = await response.json().catch(() => ({}))
+  if (!response.ok) throw new Error(result.error || `Workspace request failed (${response.status}).`)
+  return result
 }
 
 // Activity bar items
@@ -154,6 +166,9 @@ export function Studio({ username }) {
   const [projects, setProjects] = useState([{ name: 'Untitled project', files: starterFiles }])
   const [projectIndex, setProjectIndex] = useState(0)
   const [projectName, setProjectName] = useState('')
+  const [workspaceFolders, setWorkspaceFolders] = useState([])
+  const [workspaceStatus, setWorkspaceStatus] = useState('Loading local workspace')
+  const saveEditorRef = useRef(null)
 
   // File state
   const [openTabs, setOpenTabs] = useState(['index.html'])
@@ -547,8 +562,7 @@ export function Studio({ username }) {
 
     // Add keyboard shortcuts
     editor.addCommand(monaco.KeyMod.CtrlCmd | monaco.KeyCode.KeyS, () => {
-      // Save functionality
-      console.log('Save triggered')
+      saveEditorRef.current?.(editor.getValue())
     })
 
     editor.addCommand(monaco.KeyMod.CtrlCmd | monaco.KeyCode.KeyF, () => {
@@ -573,6 +587,7 @@ export function Studio({ username }) {
 
   const project = projects[projectIndex]
   const fileNames = Object.keys(project.files)
+  const sortedWorkspaceFolders = [...workspaceFolders].sort((left, right) => left.localeCompare(right))
   const canPreview = activeTab.endsWith('.html')
 
   // Responsive design
@@ -589,6 +604,26 @@ export function Studio({ username }) {
   useEffect(() => {
     setDraft(project.files[activeTab] || '')
   }, [activeTab, projectIndex, project.files])
+
+  useEffect(() => {
+    let active = true
+    requestWorkspace('/').then((workspace) => {
+      if (!active) return
+      const firstFile = Object.keys(workspace.files).sort((left, right) => left.localeCompare(right))[0] || ''
+      setProjects([{ name: workspace.name || 'Local workspace', files: workspace.files }])
+      setProjectIndex(0)
+      setWorkspaceFolders(workspace.folders || [])
+      setActiveTab(firstFile)
+      setOpenTabs(firstFile ? [firstFile] : [])
+      setDraft(firstFile ? workspace.files[firstFile] : '')
+      setWorkspaceStatus(workspace.truncated ? 'Workspace loaded (file limit reached)' : 'Local workspace ready')
+    }).catch((error) => {
+      if (!active) return
+      setWorkspaceStatus(`Local workspace unavailable: ${error.message}`)
+      setTerminalHistory((current) => [...current, { type: 'error', text: `Workspace: ${error.message}` }])
+    })
+    return () => { active = false }
+  }, [])
 
   // Auto-scroll terminal
   useEffect(() => {
@@ -628,6 +663,33 @@ export function Studio({ username }) {
     setProjects((current) => current.map((item, index) => (
       index === projectIndex ? { ...item, files: { ...item.files, [activeTab]: value } } : item
     )))
+  }
+
+  const saveWorkspaceFile = async (fileName, content = project.files[fileName]) => {
+    if (!fileName || typeof content !== 'string') return
+    try {
+      await requestWorkspace('/file', 'POST', { path: fileName, content, mode: 'write' })
+      setWorkspaceStatus(`Saved ${fileName}`)
+      setTerminalHistory((current) => [...current, { type: 'success', text: `Saved ${fileName}` }])
+    } catch (error) {
+      setWorkspaceStatus(`Save failed: ${error.message}`)
+      setTerminalHistory((current) => [...current, { type: 'error', text: `Save failed: ${error.message}` }])
+    }
+  }
+
+  saveEditorRef.current = (content) => saveWorkspaceFile(activeTab, content)
+
+  const saveAllWorkspaceFiles = async () => {
+    for (const [fileName, content] of Object.entries(project.files)) {
+      try {
+        await requestWorkspace('/file', 'POST', { path: fileName, content, mode: 'write' })
+      } catch (error) {
+        setTerminalHistory((current) => [...current, { type: 'error', text: `Could not save ${fileName}: ${error.message}` }])
+        return
+      }
+    }
+    setWorkspaceStatus(`Saved ${Object.keys(project.files).length} workspace files`)
+    setTerminalHistory((current) => [...current, { type: 'success', text: 'All workspace files saved.' }])
   }
 
   const undo = () => {
@@ -777,6 +839,7 @@ export function Studio({ username }) {
         const data = await response.json()
         if (response.ok) {
           const code = extractCode(data.text)
+          await requestWorkspace('/file', 'POST', { path: activeTab, content: code, mode: 'write' })
           updateDraft(code)
           setAiPlan(prev => prev.map(s => s.id === step.id ? { ...s, completed: true } : s))
         } else {
@@ -874,29 +937,48 @@ export function Studio({ username }) {
     }
   }
 
-  const addFile = () => {
+  const addFile = async () => {
     const name = newFileName.trim()
-    if (!name || project.files[name] !== undefined) return
-    setProjects((current) => current.map((item, index) => (
-      index === projectIndex ? { ...item, files: { ...item.files, [name]: '' } } : item
-    )))
-    openFile(name)
-    setNewFileName('')
-    setShowNewFileInput(false)
+    if (!isSafeWorkspaceFileName(name) || project.files[name] !== undefined) return
+    try {
+      await requestWorkspace('/file', 'POST', { path: name, content: '', mode: 'create' })
+      setProjects((current) => current.map((item, index) => (
+        index === projectIndex ? { ...item, files: { ...item.files, [name]: '' } } : item
+      )))
+      openFile(name)
+      setNewFileName('')
+      setShowNewFileInput(false)
+      setWorkspaceStatus(`Created ${name}`)
+    } catch (error) {
+      setTerminalHistory((current) => [...current, { type: 'error', text: `Create file failed: ${error.message}` }])
+    }
   }
 
-  const deleteFile = (fileName) => {
-    if (confirm(`Delete ${fileName}?`)) {
+  const deleteFile = async (fileName) => {
+    if (window.confirm(`Delete ${fileName} from disk? This cannot be undone.`)) {
+      try {
+        await requestWorkspace('/file', 'DELETE', { path: fileName })
+      } catch (error) {
+        setTerminalHistory((current) => [...current, { type: 'error', text: `Delete failed: ${error.message}` }])
+        return
+      }
       setProjects((current) => current.map((item, index) => (
         index === projectIndex ? { ...item, files: Object.fromEntries(Object.entries(item.files).filter(([key]) => key !== fileName)) } : item
       )))
       closeTab(fileName, { stopPropagation: () => {} })
+      setWorkspaceStatus(`Deleted ${fileName}`)
     }
   }
 
-  const renameFile = (oldName) => {
+  const renameFile = async (oldName) => {
     const newName = prompt('Enter new name:', oldName)
-    if (newName && newName !== oldName && !project.files[newName]) {
+    if (newName && newName !== oldName && isSafeWorkspaceFileName(newName) && !project.files[newName]) {
+      try {
+        await requestWorkspace('/file', 'PATCH', { from: oldName, to: newName })
+      } catch (error) {
+        setTerminalHistory((current) => [...current, { type: 'error', text: `Rename failed: ${error.message}` }])
+        return
+      }
       setProjects((current) => current.map((item, index) => {
         if (index !== projectIndex) return item
         const { [oldName]: value, ...rest } = item.files
@@ -906,6 +988,47 @@ export function Studio({ username }) {
         setActiveTab(newName)
       }
       setOpenTabs(openTabs.map(tab => tab === oldName ? newName : tab))
+      setWorkspaceStatus(`Renamed ${oldName} to ${newName}`)
+    }
+  }
+
+  const addFolder = async () => {
+    const name = newFolderName.trim()
+    if (!isSafeWorkspaceFileName(name)) return
+    try {
+      await requestWorkspace('/folder', 'POST', { path: name })
+      setWorkspaceFolders((current) => [...new Set([...current, ...name.split(/[\\/]/).map((_, index, parts) => parts.slice(0, index + 1).join('/'))])])
+      setNewFolderName('')
+      setShowNewFolderInput(false)
+      setWorkspaceStatus(`Created folder ${name}`)
+    } catch (error) {
+      setTerminalHistory((current) => [...current, { type: 'error', text: `Create folder failed: ${error.message}` }])
+    }
+  }
+
+  const deleteFolder = async (folderName) => {
+    if (!window.confirm(`Delete folder ${folderName} and everything inside it? This cannot be undone.`)) return
+    try {
+      await requestWorkspace('/folder', 'DELETE', { path: folderName, recursive: true })
+      const prefix = `${folderName}/`
+      const removedFiles = Object.keys(project.files).filter((fileName) => fileName.startsWith(prefix))
+      const removed = new Set(removedFiles)
+      setProjects((current) => current.map((item, index) => (
+        index === projectIndex
+          ? { ...item, files: Object.fromEntries(Object.entries(item.files).filter(([fileName]) => !removed.has(fileName))) }
+          : item
+      )))
+      const remainingTabs = openTabs.filter((tab) => !removed.has(tab))
+      setOpenTabs(remainingTabs)
+      if (removed.has(activeTab)) {
+        const nextTab = remainingTabs.at(-1) || ''
+        setActiveTab(nextTab)
+        setDraft(project.files[nextTab] || '')
+      }
+      setWorkspaceFolders((current) => current.filter((folder) => folder !== folderName && !folder.startsWith(prefix)))
+      setWorkspaceStatus(`Deleted folder ${folderName}`)
+    } catch (error) {
+      setTerminalHistory((current) => [...current, { type: 'error', text: `Delete folder failed: ${error.message}` }])
     }
   }
 
@@ -928,7 +1051,7 @@ export function Studio({ username }) {
         method: 'POST',
         headers: { 'Content-Type': 'application/json' },
         body: JSON.stringify({ messages: [
-          { role: 'user', content: `You are assisting with project ${project.name} in Vux AI Studio. Active file: ${activeTab || 'none'}. Existing files: ${fileNames.join(', ')}. Current file content:\n\n${draft}\n\nUser request: ${aiPrompt}\n\nReturn exactly one JSON object with one of these actions: {"action":"edit","filename":"existing file","content":"complete updated file"}; {"action":"create","filename":"new file","content":"complete file content"}; {"action":"delete","filename":"existing file","reason":"brief reason"}; or {"action":"answer","message":"explanation only"}. Use edit for an existing file, create only when requested, and delete only when explicitly requested. Never include markdown fences. Do not claim a file changed; the user must approve with Apply.` },
+          { role: 'user', content: `You are assisting with the local workspace in Vux AI Studio. Active file: ${activeTab || 'none'}. Existing files: ${fileNames.slice(0, 200).join(', ')}. Existing folders: ${sortedWorkspaceFolders.slice(0, 100).join(', ')}. Current file content:\n\n${draft}\n\nUser request: ${aiPrompt}\n\nReturn exactly one JSON object with one of these actions: {"action":"edit","filename":"existing relative file path","content":"complete updated file"}; {"action":"create","filename":"new relative file path","content":"complete file content"}; {"action":"delete","filename":"existing relative file path","reason":"brief reason"}; {"action":"create_folder","path":"new relative folder path"}; {"action":"delete_folder","path":"existing relative folder path","recursive":true,"reason":"brief reason"}; or {"action":"answer","message":"explanation only"}. Use edit for existing files, create only when requested, and delete only when explicitly requested. Never include markdown fences. Do not claim a file changed; the user must approve with Apply.` },
         ] }),
       })
       const data = await response.json()
@@ -942,10 +1065,44 @@ export function Studio({ username }) {
     }
   }
 
-  const applyAiReply = () => {
+  const applyAiReply = async () => {
     if (!aiReply || aiReply.startsWith('AI error:')) return
     const operation = parseAiFileAction(aiReply)
     if (operation?.action === 'answer') return
+
+    if (operation?.action === 'create_folder' || operation?.action === 'delete_folder') {
+      const folderPath = operation.path?.trim()
+      if (!isSafeWorkspaceFileName(folderPath)) {
+        setAiReply('The proposed folder path is invalid. Use a relative workspace path.')
+        return
+      }
+      if (operation.action === 'delete_folder' && !window.confirm(`Allow the assistant to delete ${folderPath} and everything inside it?\n\n${operation.reason || 'This action cannot be undone.'}`)) return
+      try {
+        if (operation.action === 'create_folder') {
+          await requestWorkspace('/folder', 'POST', { path: folderPath })
+          setWorkspaceFolders((current) => [...new Set([...current, ...folderPath.split(/[\\/]/).map((_, index, parts) => parts.slice(0, index + 1).join('/'))])])
+        } else {
+          await requestWorkspace('/folder', 'DELETE', { path: folderPath, recursive: operation.recursive === true })
+          const prefix = `${folderPath}/`
+          const removed = new Set(Object.keys(project.files).filter((fileName) => fileName.startsWith(prefix)))
+          setProjects((current) => current.map((item, index) => (
+            index === projectIndex ? { ...item, files: Object.fromEntries(Object.entries(item.files).filter(([fileName]) => !removed.has(fileName))) } : item
+          )))
+          const remainingTabs = openTabs.filter((tab) => !removed.has(tab))
+          setOpenTabs(remainingTabs)
+          if (removed.has(activeTab)) {
+            const nextTab = remainingTabs.at(-1) || ''
+            setActiveTab(nextTab)
+            setDraft(project.files[nextTab] || '')
+          }
+          setWorkspaceFolders((current) => current.filter((folder) => folder !== folderPath && !folder.startsWith(prefix)))
+        }
+        setWorkspaceStatus(`${operation.action === 'create_folder' ? 'Created' : 'Deleted'} folder ${folderPath}`)
+      } catch (error) {
+        setAiReply(`Workspace action failed: ${error.message}`)
+      }
+      return
+    }
 
     const fileName = operation?.filename?.trim() || activeTab
     if (!isSafeWorkspaceFileName(fileName)) {
@@ -959,6 +1116,12 @@ export function Studio({ username }) {
         return
       }
       if (!window.confirm(`Allow the assistant to delete ${fileName}?\n\n${operation.reason || 'This action cannot be undone.'}`)) return
+      try {
+        await requestWorkspace('/file', 'DELETE', { path: fileName })
+      } catch (error) {
+        setAiReply(`Delete failed: ${error.message}`)
+        return
+      }
       setProjects((current) => current.map((item, index) => (
         index === projectIndex ? { ...item, files: Object.fromEntries(Object.entries(item.files).filter(([key]) => key !== fileName)) } : item
       )))
@@ -978,12 +1141,19 @@ export function Studio({ username }) {
       return
     }
 
-    if (operation?.action === 'create' && Object.prototype.hasOwnProperty.call(project.files, fileName) &&
+    const fileExists = Object.prototype.hasOwnProperty.call(project.files, fileName)
+    if (operation?.action === 'create' && fileExists &&
       !window.confirm(`${fileName} already exists. Allow the assistant to overwrite it?`)) return
 
     if (operation?.action === 'create' || operation?.action === 'edit') {
       if (operation.action === 'edit' && !Object.prototype.hasOwnProperty.call(project.files, fileName)) {
         setAiReply(`The proposed edit targets a file that does not exist: ${fileName}`);
+        return
+      }
+      try {
+        await requestWorkspace('/file', 'POST', { path: fileName, content, mode: fileExists ? 'write' : 'create' })
+      } catch (error) {
+        setAiReply(`File action failed: ${error.message}`)
         return
       }
       setProjects((current) => current.map((item, index) => (
@@ -995,7 +1165,10 @@ export function Studio({ username }) {
       return
     }
 
-    if (activeTab) updateDraft(content)
+    if (activeTab) {
+      await requestWorkspace('/file', 'POST', { path: activeTab, content, mode: 'write' })
+      updateDraft(content)
+    }
   }
 
   const handleTerminalCommand = async (event) => {
@@ -1015,7 +1188,7 @@ export function Studio({ username }) {
     
     // Built-in commands
     if (command === 'help') {
-      setTerminalHistory(prev => [...prev, { type: 'info', text: 'Available commands: help, clear, ls, pwd, echo, date, npm, git, node, python, pip' }])
+      setTerminalHistory(prev => [...prev, { type: 'info', text: 'Allowed: npm --version/test/start/run <script>/install/ci, pip install, python --version/-m pytest, node --version, git status/diff/log/branch' }])
     } else if (command === 'clear') {
       setTerminalHistory([{ type: 'info', text: 'Vux AI Studio Terminal' }])
     } else if (command === 'ls') {
@@ -1084,8 +1257,8 @@ export function Studio({ username }) {
   const commands = [
     { id: 'newFile', label: 'New File', shortcut: 'Ctrl+N', action: () => setShowNewFileInput(true) },
     { id: 'newFolder', label: 'New Folder', shortcut: 'Ctrl+Shift+N', action: () => setShowNewFolderInput(true) },
-    { id: 'save', label: 'Save File', shortcut: 'Ctrl+S', action: () => console.log('Save') },
-    { id: 'saveAll', label: 'Save All Files', shortcut: 'Ctrl+Shift+S', action: () => console.log('Save All') },
+    { id: 'save', label: 'Save File', shortcut: 'Ctrl+S', action: () => saveWorkspaceFile(activeTab, draft) },
+    { id: 'saveAll', label: 'Save All Files', shortcut: 'Ctrl+Shift+S', action: saveAllWorkspaceFiles },
     { id: 'closeTab', label: 'Close Editor', shortcut: 'Ctrl+W', action: () => activeTab && closeTab(activeTab, { stopPropagation: () => {} }) },
     { id: 'closeAllTabs', label: 'Close All Editors', shortcut: 'Ctrl+K Ctrl+W', action: () => { setOpenTabs([]); setActiveTab(''); } },
     { id: 'formatDocument', label: 'Format Document', shortcut: 'Shift+Alt+F', action: () => console.log('Format') },
@@ -1331,13 +1504,34 @@ export function Studio({ username }) {
                   </div>
                 )}
 
+                {showNewFolderInput && (
+                  <div className="px-3 py-2 border-b border-forge-border">
+                    <input
+                      value={newFolderName}
+                      onChange={(event) => setNewFolderName(event.target.value)}
+                      onKeyDown={(event) => event.key === 'Enter' && addFolder()}
+                      placeholder="folder/subfolder"
+                      className="w-full bg-forge-surfaceLow border border-forge-border rounded px-2 py-1 text-xs"
+                      autoFocus
+                    />
+                  </div>
+                )}
+
                 <div className="flex-1 overflow-auto p-2">
                   <div className="mb-2">
                     <div className="flex items-center gap-2 px-2 py-1 text-xs font-semibold text-forge-textMuted">
                       <span>📁</span>
                       <span>{project.name}</span>
                     </div>
+                    <p className="px-2 text-[10px] text-forge-textMuted">{workspaceStatus}</p>
                   </div>
+
+                  {sortedWorkspaceFolders.map((folder) => (
+                    <div key={folder} className="flex items-center justify-between px-2 py-1 rounded hover:bg-forge-surfaceLow group text-xs">
+                      <span className="truncate" title={folder}>📁 {folder}</span>
+                      <button onClick={() => deleteFolder(folder)} className="hidden group-hover:block p-1" title={`Delete ${folder}`}>🗑</button>
+                    </div>
+                  ))}
                   
                   {fileNames.length === 0 && (
                     <p className="text-xs text-forge-textMuted px-2">Empty project. Add a file to begin.</p>
@@ -1673,6 +1867,7 @@ export function Studio({ username }) {
               <div className="flex items-center justify-between px-3 py-1 border-b border-forge-border bg-forge-surfaceLow text-xs">
                 <span>{activeTab || 'No file selected'}</span>
                 <div className="flex items-center gap-2">
+                  <button onClick={() => saveWorkspaceFile(activeTab, draft)} disabled={!activeTab} className="hover:bg-forge-surfaceLow px-2 py-1 rounded disabled:opacity-40" title="Save to workspace (Ctrl+S)">Save</button>
                   <button
                     onClick={() => setShowCommandPalette(true)}
                     className="hover:bg-forge-surfaceLow px-2 py-1 rounded"

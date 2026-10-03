@@ -12,6 +12,7 @@ import imageRouter from './routes/image.js';
 import object3dRouter from './routes/3d.js';
 import terminalRouter from './routes/terminal.js';
 import projectRouter from './routes/project.js';
+import workspaceRouter from './routes/workspace.js';
 import iotRouter from './routes/iot.js';
 import esp32Router from './routes/esp32.js';
 import deviceRouter from './routes/device.js';
@@ -98,6 +99,7 @@ if (process.env.VERCEL === '1' || process.env.NODE_ENV === 'production') {
   app.use('/api/terminal', hostedExecutionDisabled);
   app.use('/api/project/run', hostedExecutionDisabled);
   app.use('/api/project/fix', hostedExecutionDisabled);
+  app.use('/api/workspace', hostedExecutionDisabled);
 }
 
 app.use('/api/chat', chatRouter);
@@ -106,6 +108,7 @@ app.use('/api/image', imageRouter);
 app.use('/api/3d', object3dRouter);
 app.use('/api/terminal', terminalRouter);
 app.use('/api/project', projectRouter);
+app.use('/api/workspace', workspaceRouter);
 app.use('/api/device', deviceRouter);
 app.use('/api/v1/iot/esp32', esp32Router);
 app.use('/api/v1/iot', iotRouter);
@@ -127,8 +130,9 @@ app.get('*', (req, res, next) => {
 if (process.env.VERCEL !== '1') {
   const PORT = process.env.PORT || 3001;
   const hasAnyAiKey = Boolean(process.env.GEMINI_API_KEY);
+  const HOST = process.env.NODE_ENV === 'production' ? '0.0.0.0' : '127.0.0.1';
 
-  app.listen(PORT, () => {
+  app.listen(PORT, HOST, () => {
     console.log(`Vux AI Studio is running at http://localhost:${PORT}`);
     if (!hasAnyAiKey) console.warn('  Warning: no AI key is set — chat will fail.');
   });

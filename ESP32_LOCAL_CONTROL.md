@@ -13,8 +13,8 @@ This is an alternative to Render/Vercel for nearby control. The ESP32 hosts its 
 
 ## Controls and protection
 
-The page has separate Fan and Light OFF/ON controls for Room 1 and Room 2. It communicates directly with the ESP32; it does not call the website backend. ON requests are rejected while the local overcurrent latch is active, and the firmware turns all four relays off when the threshold is exceeded for the confirmation interval. Reset is allowed only after current remains below the threshold for three seconds.
+The page has separate Fan and Light OFF/ON controls for Room 1 and Room 2. It communicates directly with the ESP32; it does not call the website backend. This firmware has no current sensor and provides no current-based overload protection.
 
-The ACS712 sensitivity, zero-current voltage, and 3 A limit in this sketch are example calibration values, not verified safety limits. Test with relays disconnected or safe low-voltage loads first. Do not use the current estimate as a certified mains safety device; have the actual sensor, relay isolation, fusing, and wiring reviewed by a qualified person before connecting mains loads. The local page is available to anyone who knows the AP password, so keep it private and change it if disclosed.
+Test with relays disconnected or safe low-voltage loads first. Use appropriately rated external fuses and have relay isolation and wiring reviewed by a qualified person before connecting mains loads. The local page is available to anyone who knows the AP password, so keep it private and change it if disclosed.
 
 This local-only sketch does not upload telemetry to Render and does not expose internet remote control. To return to cloud mode, upload the separate cloud firmware and use the cloud setup guide.

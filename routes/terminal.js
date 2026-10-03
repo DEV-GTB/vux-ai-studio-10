@@ -1,45 +1,46 @@
 import { Router } from 'express';
-import { exec } from 'child_process';
-import { promisify } from 'util';
+import { runLocalCommand } from '../lib/localExecution.js';
 
 const router = Router();
-const execAsync = promisify(exec);
+
+function requireLocalMode(req, res, next) {
+  if (process.env.VERCEL === '1' || process.env.NODE_ENV === 'production') {
+    return res.status(403).json({ error: 'HOSTED_EXECUTION_DISABLED' });
+  }
+  const origin = req.get('origin');
+  if (origin) {
+    try {
+      if (!['localhost', '127.0.0.1', '::1', '[::1]'].includes(new URL(origin).hostname.toLowerCase())) {
+        return res.status(403).json({ error: 'LOCAL_TERMINAL_ONLY' });
+      }
+    } catch {
+      return res.status(403).json({ error: 'INVALID_ORIGIN' });
+    }
+  }
+  if (req.hostname && !['localhost', '127.0.0.1', '::1', '[::1]'].includes(req.hostname.toLowerCase())) {
+    return res.status(403).json({ error: 'LOCAL_TERMINAL_ONLY' });
+  }
+  if (!req.is('application/json')) return res.status(415).json({ error: 'JSON_REQUIRED' });
+  return next();
+}
 
 // POST /api/terminal - Execute terminal commands
-router.post('/', async (req, res) => {
-  const { command, projectPath } = req.body;
-  
+router.post('/', requireLocalMode, async (req, res) => {
+  const { command } = req.body || {};
   if (!command || typeof command !== 'string') {
     return res.status(400).json({ error: 'Command is required' });
   }
 
   try {
-    // Basic security check - prevent dangerous commands
-    const dangerousCommands = ['rm -rf', 'del /', 'format', 'shutdown', 'reboot'];
-    if (dangerousCommands.some(dangerous => command.toLowerCase().includes(dangerous))) {
-      return res.status(403).json({ error: 'Dangerous command not allowed' });
-    }
-
-    // Execute the command
-    const { stdout, stderr } = await execAsync(command, {
-      cwd: process.cwd(), // Execute from current working directory
-      timeout: 30000, // 30 second timeout
-      maxBuffer: 1024 * 1024 * 10 // 10MB buffer
-    });
-
-    const output = stdout || stderr;
-    return res.json({ 
-      success: true, 
-      output: output || 'Command executed successfully',
-      stderr: stderr || null
+    const result = await runLocalCommand(command);
+    const output = [result.stdout, result.stderr].filter(Boolean).join('\n').trim();
+    return res.status(result.success ? 200 : 400).json({
+      success: result.success,
+      code: result.code,
+      output: output || (result.success ? 'Command completed successfully.' : 'Command failed.'),
     });
   } catch (error) {
-    console.error('[terminal] Command execution failed:', error);
-    return res.status(500).json({ 
-      error: error.message || 'Command execution failed',
-      output: error.stdout || '',
-      stderr: error.stderr || ''
-    });
+    return res.status(error.status || 500).json({ error: error.status ? error.message : 'Command execution failed.' });
   }
 });
 

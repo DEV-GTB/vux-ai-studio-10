@@ -2,7 +2,6 @@
 #include <WiFi.h>
 #include <WebServer.h>
 #include <ArduinoJson.h>
-#include <math.h>
 #include <string.h>
 
 namespace nexusLocal {
@@ -15,18 +14,8 @@ constexpr uint8_t ROOM1_FAN_PIN = 25;
 constexpr uint8_t ROOM1_LIGHT_PIN = 26;
 constexpr uint8_t ROOM2_FAN_PIN = 27;
 constexpr uint8_t ROOM2_LIGHT_PIN = 14;
-constexpr uint8_t ACS712_PIN = 34;
 constexpr uint8_t ROOM1_SENSOR_PIN = 35;
 constexpr uint8_t ROOM2_SENSOR_PIN = 32;
-
-// These values require calibration for the exact ACS712 module and load.
-constexpr float ACS712_SENSITIVITY_V_PER_AMP = 0.100f;
-constexpr float ACS712_ZERO_VOLTAGE = 2.50f;
-constexpr float OVERCURRENT_LIMIT_AMPS = 3.0f;
-constexpr uint16_t CURRENT_SAMPLE_COUNT = 400;
-constexpr uint32_t CURRENT_SAMPLE_INTERVAL_MS = 1000;
-constexpr uint32_t OVERCURRENT_CONFIRM_MS = 1000;
-constexpr uint32_t SAFE_RESET_CONFIRM_MS = 3000;
 
 WebServer webServer(80);
 
@@ -34,11 +23,6 @@ bool room1Fan = false;
 bool room1Light = false;
 bool room2Fan = false;
 bool room2Light = false;
-bool protectionLatched = false;
-float systemCurrent = 0.0f;
-uint32_t lastCurrentSampleAt = 0;
-uint32_t overcurrentStartedAt = 0;
-uint32_t safeCurrentStartedAt = 0;
 
 const char INDEX_HTML[] PROGMEM = R"HTML(
 <!doctype html>
@@ -72,17 +56,15 @@ const char INDEX_HTML[] PROGMEM = R"HTML(
       <article class="room" id="room1"><h2>Room 1</h2><div class="load"><div><span class="load-name">Fan</span><span class="load-state" id="room1-fan-state">--</span></div><div class="buttons"><button id="room1-fan-off" onclick="setLoad(1,'fan',false)">OFF</button><button id="room1-fan-on" onclick="setLoad(1,'fan',true)">ON</button></div></div><div class="load"><div><span class="load-name">Light</span><span class="load-state" id="room1-light-state">--</span></div><div class="buttons"><button id="room1-light-off" onclick="setLoad(1,'light',false)">OFF</button><button id="room1-light-on" onclick="setLoad(1,'light',true)">ON</button></div></div><div class="metric"><span>ROOM SENSOR RAW</span><strong id="room1-sensor">--</strong></div></article>
       <article class="room" id="room2"><h2>Room 2</h2><div class="load"><div><span class="load-name">Fan</span><span class="load-state" id="room2-fan-state">--</span></div><div class="buttons"><button id="room2-fan-off" onclick="setLoad(2,'fan',false)">OFF</button><button id="room2-fan-on" onclick="setLoad(2,'fan',true)">ON</button></div></div><div class="load"><div><span class="load-name">Light</span><span class="load-state" id="room2-light-state">--</span></div><div class="buttons"><button id="room2-light-off" onclick="setLoad(2,'light',false)">OFF</button><button id="room2-light-on" onclick="setLoad(2,'light',true)">ON</button></div></div><div class="metric"><span>ROOM SENSOR RAW</span><strong id="room2-sensor">--</strong></div></article>
     </section>
-    <section class="metrics" aria-label="Device safety status"><div class="metric"><span>PROTECTION</span><strong id="protection">CHECKING</strong><button id="reset-protection" class="reset-button" hidden onclick="resetProtection()">RESET AFTER SAFE CHECK</button></div><div class="metric"><span>ACS712 CURRENT ESTIMATE</span><strong id="current">-- A</strong></div></section>
+    <section class="metrics" aria-label="Device status"><div class="metric"><span>DEVICE STATE</span><strong id="device-state">AVAILABLE</strong></div></section>
     <p id="notice" class="notice" role="status"></p>
-    <p class="footer">If protection trips, all loads turn off. Clear the fault and wait for a safe current reading before using Reset. Local protection values must be calibrated for your actual sensor and load.</p>
+    <p class="footer">Current monitoring is not installed. Use properly rated relays, fuses, and wiring; this controller does not detect overloads.</p>
   </main>
   <script>
-    let protectedNow=true
     function showMessage(text,isError=false){const node=document.querySelector('#notice');node.textContent=text;node.classList.toggle('error',isError)}
-    function paintLoad(room,name,on){const key=`room${room}-${name}`;document.querySelector(`#${key}-state`).textContent=on?'ON':'OFF';document.querySelector(`#${key}-state`).classList.toggle('on',on);document.querySelector(`#${key}-on`).classList.toggle('selected',on);document.querySelector(`#${key}-off`).classList.toggle('selected',!on);document.querySelector(`#${key}-on`).disabled=protectedNow||on;document.querySelector(`#${key}-off`).disabled=!on}
-    async function refresh(){try{const response=await fetch('/api/state',{cache:'no-store'});if(!response.ok)throw Error(`State HTTP ${response.status}`);const data=await response.json();protectedNow=data.protectionLatched||data.overcurrentVerifying;const state=document.querySelector('#connection');state.textContent='ESP32 ONLINE';state.classList.add('online');document.querySelector('#protection').textContent=data.protectionLatched?'PROTECTED':data.overcurrentVerifying?'VERIFYING':'NORMAL';document.querySelector('#protection').style.color=protectedNow?'var(--red)':'var(--lime)';document.querySelector('#reset-protection').hidden=!data.protectionLatched;document.querySelector('#current').textContent=`${Number(data.current).toFixed(2)} A`;document.querySelector('#room1-sensor').textContent=data.room1Sensor;document.querySelector('#room2-sensor').textContent=data.room2Sensor;paintLoad(1,'fan',data.room1Fan);paintLoad(1,'light',data.room1Light);paintLoad(2,'fan',data.room2Fan);paintLoad(2,'light',data.room2Light)}catch(error){const state=document.querySelector('#connection');state.textContent='DEVICE OFFLINE';state.classList.remove('online');showMessage(error.message,true)}}
+    function paintLoad(room,name,on){const key=`room${room}-${name}`;document.querySelector(`#${key}-state`).textContent=on?'ON':'OFF';document.querySelector(`#${key}-state`).classList.toggle('on',on);document.querySelector(`#${key}-on`).classList.toggle('selected',on);document.querySelector(`#${key}-off`).classList.toggle('selected',!on);document.querySelector(`#${key}-on`).disabled=on;document.querySelector(`#${key}-off`).disabled=!on}
+    async function refresh(){try{const response=await fetch('/api/state',{cache:'no-store'});if(!response.ok)throw Error(`State HTTP ${response.status}`);const data=await response.json();const state=document.querySelector('#connection');state.textContent='ESP32 ONLINE';state.classList.add('online');document.querySelector('#device-state').textContent='AVAILABLE';document.querySelector('#room1-sensor').textContent=data.room1Sensor;document.querySelector('#room2-sensor').textContent=data.room2Sensor;paintLoad(1,'fan',data.room1Fan);paintLoad(1,'light',data.room1Light);paintLoad(2,'fan',data.room2Fan);paintLoad(2,'light',data.room2Light)}catch(error){const state=document.querySelector('#connection');state.textContent='DEVICE OFFLINE';state.classList.remove('online');showMessage(error.message,true)}}
     async function setLoad(room,appliance,on){try{const response=await fetch('/api/relay',{method:'POST',headers:{'Content-Type':'application/json'},body:JSON.stringify({room,appliance,on})});const data=await response.json().catch(()=>({}));if(!response.ok)throw Error(data.message||`Command HTTP ${response.status}`);showMessage(`Room ${room} ${appliance} ${on?'ON':'OFF'} set locally.`);await refresh()}catch(error){showMessage(error.message,true)}}
-    async function resetProtection(){try{const response=await fetch('/api/protection/reset',{method:'POST'});const data=await response.json().catch(()=>({}));if(!response.ok)throw Error(data.message||`Reset HTTP ${response.status}`);showMessage('Protection reset after a safe current check.');await refresh()}catch(error){showMessage(error.message,true)}}
     refresh();setInterval(refresh,1000)
   </script>
 </body>
@@ -101,36 +83,6 @@ void allLoadsOff() {
   setRelay(ROOM2_LIGHT_PIN, false);
 }
 
-float readCurrentRms() {
-  double sumSquares = 0.0;
-  for (uint16_t index = 0; index < CURRENT_SAMPLE_COUNT; index++) {
-    const float voltage = analogRead(ACS712_PIN) * (3.3f / 4095.0f);
-    const float centeredVoltage = voltage - ACS712_ZERO_VOLTAGE;
-    sumSquares += centeredVoltage * centeredVoltage;
-    delayMicroseconds(250);
-  }
-  return sqrtf(static_cast<float>(sumSquares / CURRENT_SAMPLE_COUNT)) / ACS712_SENSITIVITY_V_PER_AMP;
-}
-
-void updateProtection() {
-  if (millis() - lastCurrentSampleAt < CURRENT_SAMPLE_INTERVAL_MS) return;
-  lastCurrentSampleAt = millis();
-  systemCurrent = readCurrentRms();
-
-  if (systemCurrent > OVERCURRENT_LIMIT_AMPS) {
-    safeCurrentStartedAt = 0;
-    if (overcurrentStartedAt == 0) overcurrentStartedAt = millis();
-    if (!protectionLatched && millis() - overcurrentStartedAt >= OVERCURRENT_CONFIRM_MS) {
-      protectionLatched = true;
-      allLoadsOff();
-    }
-    return;
-  }
-
-  overcurrentStartedAt = 0;
-  if (protectionLatched && safeCurrentStartedAt == 0) safeCurrentStartedAt = millis();
-}
-
 uint8_t getRelayPin(uint8_t room, const char* appliance) {
   if (room == 1 && strcmp(appliance, "fan") == 0) return ROOM1_FAN_PIN;
   if (room == 1 && strcmp(appliance, "light") == 0) return ROOM1_LIGHT_PIN;
@@ -141,8 +93,6 @@ uint8_t getRelayPin(uint8_t room, const char* appliance) {
 
 void sendState() {
   StaticJsonDocument<512> state;
-  state["protectionLatched"] = protectionLatched;
-  state["current"] = systemCurrent;
   state["room1Fan"] = room1Fan;
   state["room1Light"] = room1Light;
   state["room2Fan"] = room2Fan;
@@ -172,30 +122,11 @@ void handleRelayCommand() {
     webServer.send(400, "application/json", "{\"error\":\"UNKNOWN_APPLIANCE\"}");
     return;
   }
-  if (on && protectionLatched) {
-    webServer.send(409, "application/json", "{\"error\":\"PROTECTION_ACTIVE\",\"message\":\"Local overcurrent protection is active.\"}");
-    return;
-  }
-
   setRelay(pin, on);
   if (room == 1 && strcmp(appliance, "fan") == 0) room1Fan = on;
   if (room == 1 && strcmp(appliance, "light") == 0) room1Light = on;
   if (room == 2 && strcmp(appliance, "fan") == 0) room2Fan = on;
   if (room == 2 && strcmp(appliance, "light") == 0) room2Light = on;
-  webServer.send(200, "application/json", "{\"accepted\":true}");
-}
-
-void handleProtectionReset() {
-  systemCurrent = readCurrentRms();
-  if (!protectionLatched || safeCurrentStartedAt == 0 ||
-      millis() - safeCurrentStartedAt < SAFE_RESET_CONFIRM_MS ||
-      systemCurrent >= OVERCURRENT_LIMIT_AMPS) {
-    webServer.send(409, "application/json", "{\"error\":\"UNSAFE_TO_RESET\",\"message\":\"Current must remain below the limit for three seconds before reset.\"}");
-    return;
-  }
-
-  protectionLatched = false;
-  safeCurrentStartedAt = 0;
   webServer.send(200, "application/json", "{\"accepted\":true}");
 }
 
@@ -205,7 +136,6 @@ bool apPasswordIsConfigured() {
 
 void setup() {
   Serial.begin(115200);
-  analogReadResolution(12);
 
   pinMode(ROOM1_FAN_PIN, OUTPUT);
   pinMode(ROOM1_LIGHT_PIN, OUTPUT);
@@ -229,7 +159,6 @@ void setup() {
   webServer.on("/", HTTP_GET, []() { webServer.send_P(200, "text/html", INDEX_HTML); });
   webServer.on("/api/state", HTTP_GET, sendState);
   webServer.on("/api/relay", HTTP_POST, handleRelayCommand);
-  webServer.on("/api/protection/reset", HTTP_POST, handleProtectionReset);
   webServer.onNotFound([]() { webServer.send(404, "application/json", "{\"error\":\"NOT_FOUND\"}"); });
   webServer.begin();
 
@@ -238,7 +167,6 @@ void setup() {
 }
 
 void loop() {
-  updateProtection();
   webServer.handleClient();
   delay(2);
 }

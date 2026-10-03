@@ -33,7 +33,7 @@ test('accepts a nested device payload and preserves explicitly reported telemetr
   assert.equal(result.device.telemetry.system.currentQuality, 'VALID');
 });
 
-test('maps FW 1.2 current validity, relay booleans, room states, and diagnostic values', () => {
+test('maps legacy telemetry validity, relay booleans, room states, and diagnostics', () => {
   const result = normalizeEsp32State({
     deviceId: 'NEXUS-ABC123',
     firmwareVersion: '1.2.0',
@@ -51,7 +51,7 @@ test('maps FW 1.2 current validity, relay booleans, room states, and diagnostic 
       { roomId: 1, name: 'Kitchen', relayState: true, sensorPresent: true, sensorValid: true, sensorRaw: 0, stateName: 'NORMAL', faultCode: '' },
       { roomId: 2, name: 'Office', relayState: false, sensorPresent: false, sensorValid: true, sensorRaw: 1, stateName: 'PROTECTED', faultCode: 'PRESENCE_LOST' },
     ],
-  }, '2026-09-26T12:00:00.000Z', { r1: { pin: 35, raw: 0, present: true }, acsRaw: 2394 });
+  }, '2026-09-26T12:00:00.000Z', { r1: { pin: 35, raw: 0, present: true } });
 
   assert.equal(result.device.telemetry.system.voltage, null);
   assert.equal(result.device.telemetry.system.current, 0.735);
@@ -64,5 +64,4 @@ test('maps FW 1.2 current validity, relay booleans, room states, and diagnostic 
   assert.equal(result.device.rooms[0].sensorPresent, true);
   assert.equal(result.device.rooms[1].stateName, 'PROTECTED');
   assert.equal(result.device.alerts[0].type, 'PRESENCE_LOST');
-  assert.equal(result.device.diagnostics.acsRaw, 2394);
 });

@@ -4,6 +4,7 @@ import { promisify } from 'util';
 import { readFile, access } from 'fs/promises';
 import path from 'path';
 import { fileURLToPath } from 'url';
+import { runLocalCommand, startLocalCommand } from '../lib/localExecution.js';
 
 const router = Router();
 const execAsync = promisify(exec);
@@ -172,27 +173,17 @@ router.get('/info', async (req, res) => {
 
 // POST /api/project/run - Run project with detected command
 router.post('/run', async (req, res) => {
-  const { command } = req.body;
-  
-  if (!command) {
+  const { command } = req.body || {};
+  if (typeof command !== 'string' || !command.trim()) {
     return res.status(400).json({ error: 'Command is required' });
   }
 
   try {
-    // Start the process in background
-    const { spawn } = await import('child_process');
-    const process = spawn(command.split(' ')[0], command.split(' ').slice(1), {
-      cwd: process.cwd(),
-      detached: true,
-      stdio: 'ignore'
-    });
-
-    process.unref();
-    
+    const started = await startLocalCommand(command);
     res.json({ 
       success: true, 
       message: 'Project started successfully',
-      pid: process.pid
+      pid: started.pid
     });
   } catch (error) {
     console.error('[project] Run failed:', error);
@@ -214,7 +205,8 @@ router.post('/fix', async (req, res) => {
     for (const issue of issues) {
       if (issue.includes('Dependencies not installed')) {
         try {
-          await execAsync('npm install', { cwd: process.cwd() });
+          const result = await runLocalCommand('npm install');
+          if (!result.success) throw new Error(result.stderr || 'npm install failed.');
           fixes.push({ issue, fixed: true, command: 'npm install' });
         } catch (error) {
           fixes.push({ issue, fixed: false, error: error.message });
