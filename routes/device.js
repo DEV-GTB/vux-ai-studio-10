@@ -85,6 +85,7 @@ function makeDashboardPayload(payload) {
 }
 
 router.get('/state', (req, res) => {
+  res.set('Cache-Control', 'no-store');
   if (!process.env.APP_ACCESS_CODE) {
     return res.status(503).json({ error: 'DASHBOARD_ACCESS_NOT_CONFIGURED' });
   }

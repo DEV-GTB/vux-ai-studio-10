@@ -1,7 +1,13 @@
 import { Router } from 'express';
+import Cloudflare from 'cloudflare';
 import { IDENTITY_PROMPT, scrubIdentity, GENERIC_ERROR, getIdentityResponse } from '../lib/identity.js';
+import { INDIA_KNOWLEDGE_PROMPT } from '../lib/knowledge.js';
+import { searchKnowledge } from '../lib/knowledgeStore.js';
 
 const router = Router();
+const DEFAULT_CLOUDFLARE_CODE_MODELS = [
+  '@cf/meta/llama-3.3-70b-instruct-fp8-fast',
+];
 
 const FORCE_ENGLISH_INSTRUCTIONS = `
 You are Vux AI Studio.
@@ -46,7 +52,7 @@ function addUserInstruction(content, instruction) {
   return parts;
 }
 
-function buildMessages(messages) {
+function buildMessages(messages, extraKnowledge = '') {
   const normalizedMessages = messages.map((m) => {
     if (m.role !== 'user') {
       return {
@@ -67,7 +73,7 @@ function buildMessages(messages) {
   });
 
   return [
-    { role: 'system', content: `${IDENTITY_PROMPT}\n\n${FORCE_ENGLISH_INSTRUCTIONS}` },
+    { role: 'system', content: `${IDENTITY_PROMPT}\n\n${FORCE_ENGLISH_INSTRUCTIONS}\n\n${INDIA_KNOWLEDGE_PROMPT}${extraKnowledge ? `\n\nRETRIEVED KNOWLEDGE (cite when used; verify time-sensitive facts):\n${extraKnowledge}` : ''}` },
     ...normalizedMessages,
   ];
 }
@@ -114,6 +120,105 @@ async function callHuggingFace(messages, model) {
     throw error;
   }
 
+  const text = extractAssistantText(data);
+  if (!text) throw new Error('The chat service returned an empty response.');
+  return text;
+}
+
+async function callGroq(messages) {
+  const response = await fetch('https://api.groq.com/openai/v1/chat/completions', {
+    method: 'POST',
+    headers: {
+      Authorization: `Bearer ${process.env.GROQ_API_KEY}`,
+      'Content-Type': 'application/json',
+    },
+    body: JSON.stringify({
+      model: process.env.GROQ_CHAT_MODEL || 'llama-3.3-70b-versatile',
+      messages,
+      stream: false,
+    }),
+  });
+  const body = await response.text();
+  let data = {};
+  try { data = body ? JSON.parse(body) : {}; } catch { data = {}; }
+
+  if (!response.ok) {
+    const error = new Error(data?.error?.message || 'Chat request failed');
+    error.status = response.status;
+    throw error;
+  }
+
+  const text = extractAssistantText(data);
+  if (!text) throw new Error('The chat service returned an empty response.');
+  return text;
+}
+
+async function callCloudflare(messages, model = process.env.CLOUDFLARE_CHAT_MODEL || '@cf/meta/llama-3.3-70b-instruct-fp8-fast') {
+  const response = await fetch(
+    `https://api.cloudflare.com/client/v4/accounts/${process.env.CLOUDFLARE_ACCOUNT_ID}/ai/run/${model}`,
+    {
+      method: 'POST',
+      headers: {
+        Authorization: `Bearer ${process.env.CLOUDFLARE_API_TOKEN}`,
+        'Content-Type': 'application/json',
+      },
+      body: JSON.stringify({
+        messages: messages.map((message) => ({
+          role: message.role,
+          content: getTextContent(message.content),
+        })),
+        max_tokens: 2048,
+      }),
+    }
+  );
+  const body = await response.text();
+  let data = {};
+  try { data = body ? JSON.parse(body) : {}; } catch { data = {}; }
+  if (!response.ok) {
+    throw new Error(data?.errors?.[0]?.message || 'Cloudflare Workers AI request failed');
+  }
+  const text = (typeof data?.result?.response === 'string' && data.result.response.trim())
+    || (typeof data?.result?.choices?.[0]?.message?.content === 'string' && data.result.choices[0].message.content.trim())
+    || '';
+  if (!text) throw new Error('The chat service returned an empty response.');
+  return text;
+}
+
+function getCloudflareCodeModels() {
+  const configuredModels = process.env.CLOUDFLARE_CODE_MODELS
+    ?.split(',')
+    .map((model) => model.trim())
+    .filter(Boolean);
+  const models = configuredModels?.length ? configuredModels : DEFAULT_CLOUDFLARE_CODE_MODELS;
+  return [...new Set([...models, process.env.CLOUDFLARE_CHAT_MODEL || '@cf/moonshotai/kimi-k2.7-code'])];
+}
+
+async function callMistral(messages) {
+  const apiKey = process.env.MISTRAL_API_KEY;
+  if (!apiKey) throw new Error('No Mistral key');
+  const response = await fetch('https://api.mistral.ai/v1/chat/completions', {
+    method: 'POST',
+    headers: {
+      Authorization: `Bearer ${apiKey}`,
+      'Content-Type': 'application/json',
+    },
+    body: JSON.stringify({
+      model: process.env.MISTRAL_MODEL || 'mistral-small-latest',
+      messages: messages.map((message) => ({
+        role: message.role,
+        content: getTextContent(message.content),
+      })),
+      stream: false,
+    }),
+  });
+  const body = await response.text();
+  let data = {};
+  try { data = body ? JSON.parse(body) : {}; } catch { data = {}; }
+  if (!response.ok) {
+    const error = new Error(data?.error?.message || 'Chat request failed');
+    error.status = response.status;
+    throw error;
+  }
   const text = extractAssistantText(data);
   if (!text) throw new Error('The chat service returned an empty response.');
   return text;
@@ -208,12 +313,31 @@ router.post('/', async (req, res) => {
   const identityResponse = getIdentityResponse(identityMessages);
   if (identityResponse) return res.json({ text: identityResponse });
 
-  const normalizedMessages = buildMessages(messages);
+  const latestUserMessageForKb = [...messages].reverse().find((m) => (m?.role || '').toLowerCase() === 'user');
+  const latestUserText = typeof latestUserMessageForKb?.content === 'string'
+    ? latestUserMessageForKb.content
+    : Array.isArray(latestUserMessageForKb?.content)
+      ? latestUserMessageForKb.content.map((p) => (typeof p === 'string' ? p : p?.text || '')).join(' ')
+      : '';
+  const retrieved = latestUserText ? searchKnowledge(latestUserText, 5) : [];
+  const extraKnowledge = retrieved
+    .map((r) => `- [${r.source}/${r.category}] ${String(r.text || '').replace(/\s+/g, ' ').slice(0, 600)}`)
+    .join('\n');
+  const normalizedMessages = buildMessages(messages, extraKnowledge);
   const latestUserMessage = [...identityMessages].reverse().find((message) => message.role === 'user');
   const isCoding = looksLikeCodingRequest(latestUserMessage?.content || '');
+  const hasImageAttachment = normalizedMessages.some((message) => Array.isArray(message.content)
+    && message.content.some((part) => part?.type === 'image_url'));
+  const hasGroq = Boolean(process.env.GROQ_API_KEY && process.env.GROQ_API_KEY !== 'your_groq_api_key_here');
+  const hasCloudflare = Boolean(
+    process.env.CLOUDFLARE_API_TOKEN
+    && process.env.CLOUDFLARE_API_TOKEN !== 'your_cloudflare_api_token_here'
+    && process.env.CLOUDFLARE_ACCOUNT_ID
+  );
   const hasHuggingFace = Boolean(process.env.HF_TOKEN && process.env.HF_TOKEN !== 'your_huggingface_api_key_here');
   const hasGemini = Boolean(process.env.GEMINI_API_KEY && process.env.GEMINI_API_KEY !== 'your_gemini_api_key_here');
   const hasDeepSeek = Boolean(process.env.DEEPSEEK_API_KEY && process.env.DEEPSEEK_API_KEY !== 'your_deepseek_api_key_here');
+  const hasMistral = Boolean(process.env.MISTRAL_API_KEY && process.env.MISTRAL_API_KEY !== 'your_mistral_api_key_here');
   const systemMessage = normalizedMessages[0];
   const userMessages = normalizedMessages.slice(1);
   const chatModel = process.env.HF_CHAT_MODEL || 'google/gemma-4-12B-it';
@@ -223,6 +347,28 @@ router.post('/', async (req, res) => {
     : [...new Set([chatModel, deepSeekModel])];
 
   let lastError = null;
+  if (!hasImageAttachment && isCoding && hasCloudflare) {
+    for (const model of getCloudflareCodeModels()) {
+      try {
+        const text = await callCloudflare(normalizedMessages, model);
+        return res.json({ text: scrubIdentity(text) });
+      } catch (error) {
+        lastError = error;
+        console.warn(`[chat] Cloudflare Workers AI model ${model} failed; trying the next model.`);
+      }
+    }
+  }
+
+  if (!hasImageAttachment && hasGroq) {
+    try {
+      const text = await callGroq(normalizedMessages);
+      return res.json({ text: scrubIdentity(text) });
+    } catch (error) {
+      lastError = error;
+      console.warn('[chat] Groq route failed; trying the next configured service.');
+    }
+  }
+
   if (isCoding && hasDeepSeek) {
     try {
       const text = await callDeepSeek(normalizedMessages);
@@ -243,6 +389,16 @@ router.post('/', async (req, res) => {
     }
   }
 
+  if (hasMistral) {
+    try {
+      const text = await callMistral(normalizedMessages);
+      return res.json({ text: scrubIdentity(text) });
+    } catch (error) {
+      lastError = error;
+      console.warn('[chat] Mistral route failed:', error?.status || error?.message);
+    }
+  }
+
   if (hasHuggingFace) {
     for (const model of huggingFaceModels) {
       try {
@@ -252,6 +408,16 @@ router.post('/', async (req, res) => {
         lastError = error;
         console.warn('[chat] Hugging Face route failed; trying the next configured service.');
       }
+    }
+  }
+
+  if (!hasImageAttachment && !isCoding && hasCloudflare) {
+    try {
+      const text = await callCloudflare(normalizedMessages);
+      return res.json({ text: scrubIdentity(text) });
+    } catch (error) {
+      lastError = error;
+      console.warn('[chat] Cloudflare Workers AI fallback failed.');
     }
   }
 
@@ -276,7 +442,7 @@ router.post('/', async (req, res) => {
   }
 
   console.error('[chat] no configured service completed the request:', lastError?.status || lastError?.message || 'no credentials configured');
-  return res.status(hasHuggingFace || hasGemini || hasDeepSeek ? 502 : 503).json({ error: GENERIC_ERROR.chat });
+  return res.status(hasHuggingFace || hasGemini || hasDeepSeek || hasGroq || hasCloudflare ? 502 : 503).json({ error: GENERIC_ERROR.chat });
 });
 
 export default router;

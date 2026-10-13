@@ -1,4 +1,5 @@
 import { useState, useEffect, useRef } from 'react'
+import { ParticleField } from '../components/ParticleField'
 
 const dailyInsights = [
   "AI gives you the speed, Your Imagination gives it direction.",
@@ -126,7 +127,7 @@ status: "Creating magic..."`
       setCurrentInsightIndex(prev => (prev + 1) % dailyInsights.length)
     }, 10000) // Change every 10 seconds
     return () => clearInterval(insightInterval)
-  }, [dailyInsights.length])
+  }, [])
 
   useEffect(() => {
     currentIndexRef.current = 0
@@ -190,6 +191,7 @@ status: "Creating magic..."`
         <div className="relative bg-gradient-to-br from-forge-surface to-forge-surfaceHigh rounded-2xl p-6 lg:p-8 mb-6 lg:mb-8 overflow-hidden">
           {/* Background Artwork */}
           <div className="absolute inset-0 overflow-hidden">
+            <ParticleField className="absolute inset-0 h-full w-full opacity-60 pointer-events-none" />
             <div className="absolute top-0 right-0 w-64 h-64 bg-forge-primary/10 rounded-full blur-3xl"></div>
             <div className="absolute bottom-0 left-0 w-48 h-48 bg-forge-ai/10 rounded-full blur-3xl"></div>
             <div className="absolute top-1/2 left-1/2 transform -translate-x-1/2 -translate-y-1/2 w-[600px] h-[600px] bg-forge-tech/5 rounded-full blur-3xl"></div>

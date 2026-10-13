@@ -1,79 +1,87 @@
 # Vux AI Studio
 
-Vux AI Studio is a privacy-first assistant workspace for chat, ideation, and creative problem solving.
+Vux AI Studio is a private, full-stack AI workspace for secure chat, creative image and 3D generation, project intelligence, local-first training, and knowledge retrieval. It is designed to run as a self-hosted developer tool and keeps training datasets, private adapters, knowledge storage, and runtime artifacts outside the public site.
 
-The app is designed to feel like a clean AI studio experience while keeping the identity focused on Vux and using the GTB AI SYSTEM
+## What the application includes
 
-## What this app includes
-
-- Chat experience with a Vux-branded interface
-- Private, username-scoped local history
-- English-first responses for non-coding prompts
-- Secure server-side handling for AI requests
-- Clean, dark-blue modern UI
+- Secure chat with account isolation and safe response handling
+- Image generation and management workflows
+- 3D generation workflows
+- Live application vision support
+- Project workspace tooling and preview support
+- Private knowledge ingestion and search
+- Private, server-side AI training utilities
+- ESP32 home controller integrations
+- Local file storage, backup, and restore support
+- Security controls including access codes, rate limiting, and safe error responses
 
 ## Local setup
 
-```bash
-cd forge-ai-studio
-cp .env.example .env
-# add your environment values in .env
+1. Install Node.js 18 or newer.
+2. Install dependencies:
+
+   ```powershell
+   npm install
+   ```
+
+3. Create a local environment file from the example:
+
+   ```powershell
+   Copy-Item .env.example .env
+   ```
+
+4. Add your private credentials to `.env`. Do not commit `.env`; it is intentionally ignored.
+5. Start the backend:
+
+   ```powershell
+   node server.js
+   ```
+
+6. Open the application at the configured address and complete the setup flow.
+
+## Frontend development
+
+```powershell
+cd forge-ai-studio-react
 npm install
-npm start
+npm run build
 ```
 
-Then open:
-
-```text
-http://localhost:3000
-```
-
-## Deployment
-
-The app can run as one Node service or as a static frontend connected to a separate Node backend. The checked-in Render blueprint deploys the Node server and builds the React app; Vercel can host the frontend separately.
-
-For a Vercel frontend with a Render backend:
-
-1. Deploy this repository to Render using `render.yaml`. Set `GEMINI_API_KEY`, `HF_TOKEN`, and `ALLOWED_ORIGIN` to the exact public Vercel site origin, such as `https://your-site.vercel.app` (no trailing slash). Multiple comma-separated origins are supported.
-2. Copy the Render service URL, such as `https://vux-ai-studio.onrender.com`.
-3. In Vercel Project Settings > Environment Variables, set `VITE_API_BASE_URL` to that Render URL (no trailing slash), then redeploy the frontend.
-
-The browser sends API requests to the configured backend URL. Provider API keys belong only in the backend host's environment variables; never put them in a `VITE_*` variable. Add additional backend provider keys there for features that use those providers. On public hosting, terminal execution and project mutation endpoints remain disabled, and ESP32 live status remains unavailable unless a secure device-to-cloud bridge is configured. Render's free service may sleep when idle, so the first request can be slow.
+The main site uses component-level transitions, smooth sidebar navigation, and loading states for feature workspaces.
 
 ## Security and privacy
 
-- Keep API keys on the server only
-- Do not expose keys or provider details in the browser
-- Avoid public sharing of the real environment file
+- Provider keys and private configuration belong only in the backend environment
+- The environment file containing secrets must never be committed
+- Terminal execution and project mutation endpoints are disabled in production
+- Private training files are not served through the public interface
+- All errors are returned as safe generic messages
 
-## ESP32 Home Controller
+## Training and knowledge
 
-For direct, nearby phone-to-ESP32 control with no backend, use the separate [local ESP32 control sketch](esp32/nexus_local_control/nexus_local_control.ino) and follow [ESP32_LOCAL_CONTROL.md](ESP32_LOCAL_CONTROL.md). This runs its own local page at `http://192.168.4.1/`; it is separate from the cloud Render/Vercel controller.
+- Training datasets, adapters, generated artifacts, and knowledge databases are stored privately server-side
+- Seed knowledge is used only when explicitly configured
+- Training and retrieval flows use protected backend routes
 
-For two-room local Wi-Fi control with an OLED status display, use [the local-only hybrid ESP32 sketch](esp32/nexus_hybrid_control/nexus_hybrid_control.ino) and follow [ESP32_HYBRID_SETUP.md](ESP32_HYBRID_SETUP.md). It starts the `NEXUS-LOCAL` access point and does not connect to Render. The website's Home Controller has a shortcut that opens the ESP32 page in a separate tab.
+## Deployment
 
-The older server-connected firmware remains in the repository as a separate legacy option. Do not use [ESP32_CLOUD_SETUP.md](ESP32_CLOUD_SETUP.md) for the local-only hybrid setup above.
+- Use the included deployment files for container and platform deployment
+- Configure environment variables on the hosting platform, not in public files
+- Keep private service endpoints behind authenticated access
+- Configure rate limiting and access controls before exposing the application
 
-For a local-only device link, the Home Controller can use `/api/v1/iot/esp32/status`; the Node server polls the firmware's `/api/telemetry` endpoint and optionally `/api/diag` on the same reachable LAN. For cloud telemetry over a phone hotspot, use the authenticated `/api/device/status` upload and `/api/device/state` dashboard endpoints described in [ESP32_CLOUD_SETUP.md](ESP32_CLOUD_SETUP.md). The browser never contacts the ESP32 directly.
+## Development
 
-For local use, connect the computer running Node to the ESP32 access point and open the local Home Controller. Configure `ESP32_BASE_URL`, `ESP32_STATE_PATH`, and `ESP32_DIAG_PATH` in the server environment when the device uses a different address or route. Do not store Wi-Fi credentials in source control.
+- Run tests:
 
-For an all-in-one Vercel deployment, the React website and Node API can be deployed together using the repository's Vercel configuration. Set `GEMINI_API_KEY` in Vercel Project Settings > Environment Variables for AI chat. Do not set the ESP32 URL to `192.168.4.1` on Vercel: that address is private and only reachable from the device's local Wi-Fi. Cloud telemetry requires a separate authenticated device-to-cloud bridge; public relay commands are intentionally not exposed. Terminal execution and project mutation endpoints are disabled in production.
+  ```powershell
+  npm test
+  ```
 
-For an all-in-one Vercel deployment, import this repository into Vercel with the repository root as the project root. The checked-in `vercel.json` builds the React app and routes `/api/*` through the serverless Express backend. Add `GEMINI_API_KEY` as a server-side environment variable in Vercel and redeploy; never add provider secrets to a `VITE_*` variable. The public site and AI API will work, but live device status stays unavailable in Vercel until an authenticated outbound ESP32-to-cloud bridge is implemented. For production AI abuse protection, configure Vercel Firewall rate limits or a shared rate-limit store; per-instance Express limits are not a global serverless quota.
+- Keep changes consistent with the existing route, library, and page structure
+- Avoid putting secrets in public JavaScript bundles
+- Keep user-facing copy generic and free of implementation details
 
-The local-only hybrid firmware reports room sensor input values and commanded relay states to its local page. It has no voltage/current sensor, no load feedback, and no current-based overload protection; a relay state cannot confirm that a load is powered or that its wiring is intact.
+## License
 
-## Branding
-
-This project is developed by Game Theory Building Studio and intentionally branded as Vux AI Studio across the app surface and identity layer.
-
-If you want to adjust the look further, update the UI colors and text in the public interface without exposing any model provider details in the user-facing copy.
-
-## Notes
-
-- Session history is kept locally per username for a simple privacy-friendly flow.
-- The app is designed to present itself consistently as Vux AI Studio, not as a vendor-specific tool.
-- The system prompt and app identity are kept vendor-neutral by design.
-
-If you want new features later, they can be added without changing the public Vux identity.
+See `LICENSE` for licensing information.

@@ -1,6 +1,14 @@
 import { useEffect, useMemo, useState, useRef } from 'react'
 import Editor from '@monaco-editor/react'
 import { apiUrl } from '../lib/api.js'
+import {
+  saveTextToDevice,
+  importProjectFromFolder,
+  exportFilesToFolder,
+  saveProjectToBrowser,
+  loadProjectsFromBrowser,
+  supportsFolderAccess,
+} from '../lib/localFiles.js'
 
 // Custom Monaco theme to match our dark color scheme
 const forgeDarkTheme = {
@@ -104,12 +112,24 @@ function parseAiFileAction(text) {
   for (const candidate of [block?.[1], source].filter(Boolean)) {
     try {
       const value = JSON.parse(candidate)
-      if (['edit', 'create', 'delete', 'create_folder', 'delete_folder', 'answer'].includes(value?.action)) return value
+      if (['edit', 'create', 'delete', 'rename', 'create_folder', 'delete_folder', 'command', 'answer'].includes(value?.action)) return value
     } catch {
       // Non-JSON code replies use the existing active-file edit flow.
     }
   }
   return null
+}
+
+function describeAiAction(operation) {
+  if (!operation) return ''
+  if (operation.action === 'edit') return `Update file: ${operation.filename}`
+  if (operation.action === 'create') return `Create file: ${operation.filename}`
+  if (operation.action === 'delete') return `Delete file: ${operation.filename}`
+  if (operation.action === 'rename') return `Rename ${operation.filename} to ${operation.newFilename || operation.to}`
+  if (operation.action === 'create_folder') return `Create folder: ${operation.path}`
+  if (operation.action === 'delete_folder') return `Delete folder and contents: ${operation.path}`
+  if (operation.action === 'command') return `Run command: ${operation.command}`
+  return ''
 }
 
 function isSafeWorkspaceFileName(name) {
@@ -183,6 +203,16 @@ export function Studio({ username }) {
   const [aiPrompt, setAiPrompt] = useState('')
   const [aiReply, setAiReply] = useState('')
   const [isAiWorking, setIsAiWorking] = useState(false)
+  const [permissionMode, setPermissionMode] = useState(() => {
+    try {
+      return localStorage.getItem('vux-studio-permission-mode') === 'allow' ? 'allow' : 'ask'
+    } catch {
+      return 'ask'
+    }
+  })
+  const aiOperation = parseAiFileAction(aiReply)
+  const aiOperationSummary = describeAiAction(aiOperation)
+  const displayedAiReply = aiOperation?.action === 'answer' ? aiOperation.message : aiReply
 
   // Terminal state
   const [terminalHistory, setTerminalHistory] = useState([
@@ -226,7 +256,7 @@ export function Studio({ username }) {
   // Editor settings
   const [editorTheme, setEditorTheme] = useState('forge-dark')
   const [editorFontSize, setEditorFontSize] = useState(14)
-  const [editorTabSize, setEditorTabSize] = useState(2)
+  const [editorTabSize] = useState(2)
   const [editorWordWrap, setEditorWordWrap] = useState('off')
   const [editorMinimap, setEditorMinimap] = useState(true)
   const [monaco, setMonaco] = useState(null)
@@ -582,7 +612,7 @@ export function Studio({ username }) {
   const [isRunning, setIsRunning] = useState(false)
   const [aiPlanMode, setAiPlanMode] = useState(false)
   const [aiPlan, setAiPlan] = useState([])
-  const [history, setHistory] = useState([])
+  const [history] = useState([])
   const [historyIndex, setHistoryIndex] = useState(-1)
 
   const project = projects[projectIndex]
@@ -621,9 +651,28 @@ export function Studio({ username }) {
       if (!active) return
       setWorkspaceStatus(`Local workspace unavailable: ${error.message}`)
       setTerminalHistory((current) => [...current, { type: 'error', text: `Workspace: ${error.message}` }])
+      loadProjectsFromBrowser().then((saved) => {
+        if (!active || !saved?.length) return
+        const restoredFiles = saved[0].files || {}
+        const firstFile = Object.keys(restoredFiles).sort((left, right) => left.localeCompare(right))[0] || ''
+        setProjects([{ name: saved[0].name || 'Restored project', files: restoredFiles }])
+        setProjectIndex(0)
+        setActiveTab(firstFile)
+        setOpenTabs(firstFile ? [firstFile] : [])
+        setDraft(firstFile ? restoredFiles[firstFile] : '')
+        setWorkspaceStatus('Restored your project from this browser')
+      }).catch(() => {})
     })
     return () => { active = false }
   }, [])
+
+  // Persist the current project to the browser (IndexedDB, no server database).
+  useEffect(() => {
+    const timer = setTimeout(() => {
+      saveProjectToBrowser(project.name, project.files).catch(() => {})
+    }, 600)
+    return () => clearTimeout(timer)
+  }, [project.name, project.files])
 
   // Auto-scroll terminal
   useEffect(() => {
@@ -647,17 +696,6 @@ export function Studio({ username }) {
     loadProjectInfo()
   }, [])
 
-  // Save history for undo/redo
-  const saveToHistory = () => {
-    const newHistory = history.slice(0, historyIndex + 1)
-    newHistory.push({
-      files: JSON.parse(JSON.stringify(project.files)),
-      timestamp: new Date().toISOString()
-    })
-    setHistory(newHistory)
-    setHistoryIndex(newHistory.length - 1)
-  }
-
   const updateDraft = (value) => {
     setDraft(value)
     setProjects((current) => current.map((item, index) => (
@@ -667,6 +705,7 @@ export function Studio({ username }) {
 
   const saveWorkspaceFile = async (fileName, content = project.files[fileName]) => {
     if (!fileName || typeof content !== 'string') return
+    if (!confirmPermission(`Allow Studio to save changes to ${fileName}?`)) return
     try {
       await requestWorkspace('/file', 'POST', { path: fileName, content, mode: 'write' })
       setWorkspaceStatus(`Saved ${fileName}`)
@@ -677,10 +716,94 @@ export function Studio({ username }) {
     }
   }
 
+  const confirmPermission = (message) => permissionMode === 'allow' || window.confirm(message)
+
+  // Save the active editor buffer straight to the user's device (no server).
+  const saveActiveFileToDevice = async () => {
+    if (!activeTab) return
+    setWorkspaceStatus(`Saving ${activeTab} to your device...`)
+    try {
+      const result = await saveTextToDevice(activeTab, draft)
+      if (result.method === 'cancelled') {
+        setWorkspaceStatus('Device save cancelled')
+        return
+      }
+      const message = result.method === 'device'
+        ? `Saved ${result.fileName} to your device`
+        : `Downloaded ${result.fileName}`
+      setWorkspaceStatus(message)
+      setTerminalHistory((current) => [...current, { type: 'success', text: message }])
+    } catch (error) {
+      setWorkspaceStatus(`Device save failed: ${error.message}`)
+      setTerminalHistory((current) => [...current, { type: 'error', text: `Device save failed: ${error.message}` }])
+    }
+  }
+
+  // Open a folder from the user's device into the editor (no server).
+  const openLocalFolder = async () => {
+    if (!supportsFolderAccess()) {
+      setWorkspaceStatus('This browser cannot open folders directly.')
+      return
+    }
+    try {
+      setWorkspaceStatus('Choose a folder to open...')
+      const { name, files } = await importProjectFromFolder()
+      if (!Object.keys(files).length) {
+        setWorkspaceStatus('No supported text files were found in that folder.')
+        return
+      }
+      setProjects((current) => [...current, { name, files }])
+      setProjectIndex(projects.length)
+      const firstFile = Object.keys(files).sort((left, right) => left.localeCompare(right))[0] || ''
+      setActiveTab(firstFile)
+      setOpenTabs(firstFile ? [firstFile] : [])
+      setDraft(firstFile ? files[firstFile] : '')
+      setWorkspaceStatus(`Opened ${name} from your device`)
+      setTerminalHistory((current) => [...current, { type: 'success', text: `Opened folder ${name} from your device` }])
+    } catch (error) {
+      if (error?.name === 'AbortError') {
+        setWorkspaceStatus('Folder open cancelled')
+        return
+      }
+      setWorkspaceStatus(`Open folder failed: ${error.message}`)
+    }
+  }
+
+  // Write the whole project into a folder on the user's device (no server).
+  const exportProjectToFolder = async () => {
+    if (!supportsFolderAccess()) {
+      setWorkspaceStatus('This browser cannot write folders directly.')
+      return
+    }
+    try {
+      setWorkspaceStatus('Choose a folder to export into...')
+      const folder = await exportFilesToFolder(project.files, project.name)
+      const message = `Exported ${Object.keys(project.files).length} files to ${folder}`
+      setWorkspaceStatus(message)
+      setTerminalHistory((current) => [...current, { type: 'success', text: message }])
+    } catch (error) {
+      if (error?.name === 'AbortError') {
+        setWorkspaceStatus('Export cancelled')
+        return
+      }
+      setWorkspaceStatus(`Export failed: ${error.message}`)
+    }
+  }
+
+  const updatePermissionMode = (mode) => {
+    setPermissionMode(mode)
+    try {
+      localStorage.setItem('vux-studio-permission-mode', mode)
+    } catch {
+      setWorkspaceStatus('Permission mode applies for this session only.')
+    }
+  }
+
   saveEditorRef.current = (content) => saveWorkspaceFile(activeTab, content)
 
   const saveAllWorkspaceFiles = async () => {
     for (const [fileName, content] of Object.entries(project.files)) {
+      if (!confirmPermission(`Allow Studio to save changes to ${fileName}?`)) return
       try {
         await requestWorkspace('/file', 'POST', { path: fileName, content, mode: 'write' })
       } catch (error) {
@@ -719,7 +842,7 @@ export function Studio({ username }) {
       setTerminalHistory(prev => [...prev, { type: 'error', text: 'No run command detected for this project type' }])
       return
     }
-    if (!window.confirm(`Allow Studio to run this command in the workspace?\n\n$ ${projectInfo.runCommand}`)) {
+    if (!confirmPermission(`Allow Studio to run this command in the workspace?\n\n$ ${projectInfo.runCommand}`)) {
       setTerminalHistory(prev => [...prev, { type: 'info', text: 'Command cancelled.' }])
       return
     }
@@ -755,8 +878,9 @@ export function Studio({ username }) {
 
     try {
       const allIssues = [...projectHealth.issues, ...projectHealth.warnings]
+      if (!confirmPermission(`Allow Studio to apply project fixes for these issues?\n\n${allIssues.join('\n')}`)) return
       const installsDependencies = allIssues.some(issue => issue.includes('Dependencies not installed'))
-      if (installsDependencies && !window.confirm('Allow Studio to run this command in the workspace?\n\n$ npm install')) return
+      if (installsDependencies && !confirmPermission('Allow Studio to run this command in the workspace?\n\n$ npm install')) return
 
       const response = await fetch(apiUrl('/api/project/fix'), {
         method: 'POST',
@@ -821,6 +945,7 @@ export function Studio({ username }) {
   const executeAiPlan = async () => {
     for (const step of aiPlan) {
       if (step.completed) continue
+      if (!confirmPermission(`Allow the assistant to update ${activeTab || 'the active file'} for this step?\n\n${step.text}`)) break
 
       try {
         const response = await fetch(apiUrl('/api/chat'), {
@@ -858,7 +983,7 @@ export function Studio({ username }) {
       setTestResults([{ name: 'No tests configured', status: 'skipped', output: 'No test command found for this project type' }])
       return
     }
-    if (!window.confirm(`Allow Studio to run this command in the workspace?\n\n$ ${projectInfo.testCommand}`)) {
+    if (!confirmPermission(`Allow Studio to run this command in the workspace?\n\n$ ${projectInfo.testCommand}`)) {
       setTestResults([{ name: 'Test execution', status: 'skipped', output: 'Command cancelled.' }])
       return
     }
@@ -940,6 +1065,7 @@ export function Studio({ username }) {
   const addFile = async () => {
     const name = newFileName.trim()
     if (!isSafeWorkspaceFileName(name) || project.files[name] !== undefined) return
+    if (!confirmPermission(`Allow Studio to create ${name}?`)) return
     try {
       await requestWorkspace('/file', 'POST', { path: name, content: '', mode: 'create' })
       setProjects((current) => current.map((item, index) => (
@@ -955,7 +1081,7 @@ export function Studio({ username }) {
   }
 
   const deleteFile = async (fileName) => {
-    if (window.confirm(`Delete ${fileName} from disk? This cannot be undone.`)) {
+    if (confirmPermission(`Delete ${fileName} from disk? This cannot be undone.`)) {
       try {
         await requestWorkspace('/file', 'DELETE', { path: fileName })
       } catch (error) {
@@ -973,6 +1099,7 @@ export function Studio({ username }) {
   const renameFile = async (oldName) => {
     const newName = prompt('Enter new name:', oldName)
     if (newName && newName !== oldName && isSafeWorkspaceFileName(newName) && !project.files[newName]) {
+      if (!confirmPermission(`Allow Studio to rename ${oldName} to ${newName}?`)) return
       try {
         await requestWorkspace('/file', 'PATCH', { from: oldName, to: newName })
       } catch (error) {
@@ -995,6 +1122,7 @@ export function Studio({ username }) {
   const addFolder = async () => {
     const name = newFolderName.trim()
     if (!isSafeWorkspaceFileName(name)) return
+    if (!confirmPermission(`Allow Studio to create folder ${name}?`)) return
     try {
       await requestWorkspace('/folder', 'POST', { path: name })
       setWorkspaceFolders((current) => [...new Set([...current, ...name.split(/[\\/]/).map((_, index, parts) => parts.slice(0, index + 1).join('/'))])])
@@ -1007,7 +1135,7 @@ export function Studio({ username }) {
   }
 
   const deleteFolder = async (folderName) => {
-    if (!window.confirm(`Delete folder ${folderName} and everything inside it? This cannot be undone.`)) return
+    if (!confirmPermission(`Delete folder ${folderName} and everything inside it? This cannot be undone.`)) return
     try {
       await requestWorkspace('/folder', 'DELETE', { path: folderName, recursive: true })
       const prefix = `${folderName}/`
@@ -1051,13 +1179,15 @@ export function Studio({ username }) {
         method: 'POST',
         headers: { 'Content-Type': 'application/json' },
         body: JSON.stringify({ messages: [
-          { role: 'user', content: `You are assisting with the local workspace in Vux AI Studio. Active file: ${activeTab || 'none'}. Existing files: ${fileNames.slice(0, 200).join(', ')}. Existing folders: ${sortedWorkspaceFolders.slice(0, 100).join(', ')}. Current file content:\n\n${draft}\n\nUser request: ${aiPrompt}\n\nReturn exactly one JSON object with one of these actions: {"action":"edit","filename":"existing relative file path","content":"complete updated file"}; {"action":"create","filename":"new relative file path","content":"complete file content"}; {"action":"delete","filename":"existing relative file path","reason":"brief reason"}; {"action":"create_folder","path":"new relative folder path"}; {"action":"delete_folder","path":"existing relative folder path","recursive":true,"reason":"brief reason"}; or {"action":"answer","message":"explanation only"}. Use edit for existing files, create only when requested, and delete only when explicitly requested. Never include markdown fences. Do not claim a file changed; the user must approve with Apply.` },
+          { role: 'user', content: `You are assisting with the local workspace in Vux AI Studio. Active file: ${activeTab || 'none'}. Existing files: ${fileNames.slice(0, 200).join(', ')}. Existing folders: ${sortedWorkspaceFolders.slice(0, 100).join(', ')}. Current file content:\n\n${draft}\n\nUser request: ${aiPrompt}\n\nReturn exactly one JSON object with one of these actions: {"action":"edit","filename":"existing relative file path","content":"complete updated file"}; {"action":"create","filename":"new relative file path","content":"complete file content"}; {"action":"delete","filename":"existing relative file path","reason":"brief reason"}; {"action":"rename","filename":"existing relative file path","newFilename":"new relative file path"}; {"action":"create_folder","path":"new relative folder path"}; {"action":"delete_folder","path":"existing relative folder path","recursive":true,"reason":"brief reason"}; {"action":"command","command":"one command"}; or {"action":"answer","message":"explanation only"}. Only return command when the user explicitly requests command execution. Use edit for existing files, create only when requested, and delete only when explicitly requested. Never include markdown fences. Do not claim a file changed or command ran before Studio approves it.` },
         ] }),
       })
       const data = await response.json()
       if (!response.ok) throw new Error(data.error || 'AI request failed')
-      setAiReply(data.text || '')
+      const reply = data.text || ''
+      setAiReply(reply)
       setAiPrompt('')
+      if (permissionMode === 'allow' && parseAiFileAction(reply)) await applyAiReply(reply)
     } catch (error) {
       setAiReply(`AI error: ${error.message}`)
     } finally {
@@ -1065,9 +1195,10 @@ export function Studio({ username }) {
     }
   }
 
-  const applyAiReply = async () => {
-    if (!aiReply || aiReply.startsWith('AI error:')) return
-    const operation = parseAiFileAction(aiReply)
+  const applyAiReply = async (reply = aiReply) => {
+    if (!reply || reply.startsWith('AI error:')) return
+    const operation = parseAiFileAction(reply)
+    if (!operation) return
     if (operation?.action === 'answer') return
 
     if (operation?.action === 'create_folder' || operation?.action === 'delete_folder') {
@@ -1076,11 +1207,15 @@ export function Studio({ username }) {
         setAiReply('The proposed folder path is invalid. Use a relative workspace path.')
         return
       }
-      if (operation.action === 'delete_folder' && !window.confirm(`Allow the assistant to delete ${folderPath} and everything inside it?\n\n${operation.reason || 'This action cannot be undone.'}`)) return
+      if (operation.action === 'delete_folder' && !workspaceFolders.includes(folderPath)) {
+        setAiReply(`The proposed folder does not exist: ${folderPath}`)
+        return
+      }
       try {
         if (operation.action === 'create_folder') {
           await requestWorkspace('/folder', 'POST', { path: folderPath })
           setWorkspaceFolders((current) => [...new Set([...current, ...folderPath.split(/[\\/]/).map((_, index, parts) => parts.slice(0, index + 1).join('/'))])])
+          setAiReply(`Created folder: ${folderPath}`)
         } else {
           await requestWorkspace('/folder', 'DELETE', { path: folderPath, recursive: operation.recursive === true })
           const prefix = `${folderPath}/`
@@ -1096,6 +1231,7 @@ export function Studio({ username }) {
             setDraft(project.files[nextTab] || '')
           }
           setWorkspaceFolders((current) => current.filter((folder) => folder !== folderPath && !folder.startsWith(prefix)))
+          setAiReply(`Deleted folder: ${folderPath}`)
         }
         setWorkspaceStatus(`${operation.action === 'create_folder' ? 'Created' : 'Deleted'} folder ${folderPath}`)
       } catch (error) {
@@ -1115,7 +1251,6 @@ export function Studio({ username }) {
         setAiReply(`The proposed file does not exist: ${fileName}`);
         return
       }
-      if (!window.confirm(`Allow the assistant to delete ${fileName}?\n\n${operation.reason || 'This action cannot be undone.'}`)) return
       try {
         await requestWorkspace('/file', 'DELETE', { path: fileName })
       } catch (error) {
@@ -1132,19 +1267,68 @@ export function Studio({ username }) {
         setActiveTab(nextTab)
         setDraft(project.files[nextTab] || '')
       }
+      setAiReply(`Deleted file: ${fileName}`)
       return
     }
 
-    const content = typeof operation?.content === 'string' ? operation.content : extractCode(aiReply)
+    if (operation?.action === 'rename') {
+      const from = operation.filename?.trim()
+      const to = operation.newFilename?.trim() || operation.to?.trim()
+      if (!isSafeWorkspaceFileName(from) || !isSafeWorkspaceFileName(to) || !Object.hasOwn(project.files, from)) {
+        setAiReply('The proposed rename is invalid or the source file does not exist.')
+        return
+      }
+      if (Object.hasOwn(project.files, to)) {
+        setAiReply(`The proposed destination already exists: ${to}`)
+        return
+      }
+      try {
+        await requestWorkspace('/file', 'PATCH', { from, to })
+      } catch (error) {
+        setAiReply(`Rename failed: ${error.message}`)
+        return
+      }
+      setProjects((current) => current.map((item, index) => {
+        if (index !== projectIndex) return item
+        const { [from]: value, ...rest } = item.files
+        return { ...item, files: { ...rest, [to]: value } }
+      }))
+      setOpenTabs((current) => current.map((tab) => tab === from ? to : tab))
+      if (activeTab === from) setActiveTab(to)
+      setWorkspaceStatus(`Renamed ${from} to ${to}`)
+      setAiReply(`Renamed ${from} to ${to}`)
+      return
+    }
+
+    if (operation?.action === 'command') {
+      const command = operation.command?.trim()
+      if (!command || command.length > 500) {
+        setAiReply('The proposed command is invalid.')
+        return
+      }
+      try {
+        const response = await fetch(apiUrl('/api/terminal'), {
+          method: 'POST',
+          headers: { 'Content-Type': 'application/json' },
+          body: JSON.stringify({ command, projectPath: project.name }),
+        })
+        const result = await response.json()
+        if (!response.ok) throw new Error(result.error || 'Command failed')
+        setTerminalHistory((current) => [...current, { type: 'command', text: `$ ${command}` }, { type: 'success', text: result.output || 'Command completed.' }])
+        setAiReply(`Command completed: ${command}\n\n${result.output || 'Command completed successfully.'}`)
+      } catch (error) {
+        setAiReply(`Command failed: ${error.message}`)
+      }
+      return
+    }
+
+    const content = typeof operation?.content === 'string' ? operation.content : extractCode(reply)
     if (content.length > 1024 * 1024) {
       setAiReply('The proposed file exceeds the 1 MB limit.');
       return
     }
 
     const fileExists = Object.prototype.hasOwnProperty.call(project.files, fileName)
-    if (operation?.action === 'create' && fileExists &&
-      !window.confirm(`${fileName} already exists. Allow the assistant to overwrite it?`)) return
-
     if (operation?.action === 'create' || operation?.action === 'edit') {
       if (operation.action === 'edit' && !Object.prototype.hasOwnProperty.call(project.files, fileName)) {
         setAiReply(`The proposed edit targets a file that does not exist: ${fileName}`);
@@ -1162,6 +1346,7 @@ export function Studio({ username }) {
       setOpenTabs((current) => current.includes(fileName) ? current : [...current, fileName])
       setActiveTab(fileName)
       setDraft(content)
+      setAiReply(`${operation.action === 'create' && !fileExists ? 'Created' : 'Updated'} file: ${fileName}`)
       return
     }
 
@@ -1179,7 +1364,7 @@ export function Studio({ username }) {
     const requiresApproval = command.startsWith('npm ') || command === 'npm' || command.startsWith('git ') || command === 'git' ||
       command.startsWith('node ') || command === 'node' || command.startsWith('python ') || command === 'python' ||
       command.startsWith('pip ') || command === 'pip' || command.startsWith('npx ') || command.startsWith('yarn ')
-    if (requiresApproval && !window.confirm(`Allow Studio to run this command in the workspace?\n\n$ ${command}`)) {
+    if (requiresApproval && !confirmPermission(`Allow Studio to run this command in the workspace?\n\n$ ${command}`)) {
       setTerminalHistory((prev) => [...prev, { type: 'info', text: 'Command cancelled.' }])
       setTerminalInput('')
       return
@@ -1295,7 +1480,7 @@ export function Studio({ username }) {
   // Enhanced search and replace
   const performSearchReplace = () => {
     const results = []
-    const { search, replace, useRegex, caseSensitive } = searchReplaceQuery
+    const { search, useRegex, caseSensitive } = searchReplaceQuery
 
     if (!search.trim()) {
       setSearchReplaceResults([])
@@ -1786,6 +1971,21 @@ export function Studio({ username }) {
                 <h2 className="text-xs font-semibold tracking-widest mb-3">SETTINGS</h2>
                 <div className="space-y-3">
                   <div>
+                    <label htmlFor="studio-ai-permissions-settings" className="text-xs block mb-1">AI file and command permissions</label>
+                    <select
+                      id="studio-ai-permissions-settings"
+                      value={permissionMode}
+                      onChange={(event) => updatePermissionMode(event.target.value)}
+                      className="w-full bg-forge-surfaceLow border border-forge-border rounded px-2 py-1 text-xs"
+                    >
+                      <option value="ask">Ask before each action</option>
+                      <option value="allow">Allow all actions</option>
+                    </select>
+                    <p className="mt-1 text-[10px] text-forge-textMuted">
+                      {permissionMode === 'allow' ? 'Changes and allowed commands run automatically.' : 'Studio asks before each change or command.'}
+                    </p>
+                  </div>
+                  <div>
                     <label className="text-xs block mb-1">Theme</label>
                     <select className="w-full bg-forge-surfaceLow border border-forge-border rounded px-2 py-1 text-xs">
                       <option>Dark</option>
@@ -1868,6 +2068,13 @@ export function Studio({ username }) {
                 <span>{activeTab || 'No file selected'}</span>
                 <div className="flex items-center gap-2">
                   <button onClick={() => saveWorkspaceFile(activeTab, draft)} disabled={!activeTab} className="hover:bg-forge-surfaceLow px-2 py-1 rounded disabled:opacity-40" title="Save to workspace (Ctrl+S)">Save</button>
+                  <button onClick={saveActiveFileToDevice} disabled={!activeTab} className="hover:bg-forge-surfaceLow px-2 py-1 rounded disabled:opacity-40" title="Save this file to your device">Save to device</button>
+                  {supportsFolderAccess() && (
+                    <button onClick={openLocalFolder} className="hover:bg-forge-surfaceLow px-2 py-1 rounded" title="Open a folder from your device">Open folder</button>
+                  )}
+                  {supportsFolderAccess() && (
+                    <button onClick={exportProjectToFolder} className="hover:bg-forge-surfaceLow px-2 py-1 rounded" title="Export the project to a folder on your device">Export folder</button>
+                  )}
                   <button
                     onClick={() => setShowCommandPalette(true)}
                     className="hover:bg-forge-surfaceLow px-2 py-1 rounded"
@@ -2157,6 +2364,22 @@ export function Studio({ username }) {
                 </button>
               </div>
             </div>
+
+            <div className="border-b border-forge-border px-3 py-2">
+              <label htmlFor="studio-ai-permissions" className="block text-[10px] font-semibold text-forge-textMuted mb-1">AI PERMISSIONS</label>
+              <select
+                id="studio-ai-permissions"
+                value={permissionMode}
+                onChange={(event) => updatePermissionMode(event.target.value)}
+                className="w-full rounded border border-forge-border bg-forge-surfaceLow px-2 py-1.5 text-xs"
+              >
+                <option value="ask">Ask before each action</option>
+                <option value="allow">Allow all actions</option>
+              </select>
+              <p className="mt-1 text-[10px] text-forge-textMuted">
+                {permissionMode === 'allow' ? 'AI file and command actions run without confirmation.' : 'Review and approve each AI file or command action.'}
+              </p>
+            </div>
             
             {aiPlanMode ? (
               <div className="flex-1 overflow-auto p-3">
@@ -2216,7 +2439,23 @@ export function Studio({ username }) {
                   <p className="text-xs text-forge-textMuted mb-2">Ask for edits, files, or explanations.</p>
                 </div>
                 <div className="rounded-lg border border-forge-border bg-forge-surfaceLow p-3 text-sm whitespace-pre-wrap min-h-[200px]">
-                  {aiReply || 'AI suggestions will appear here. Ask it to update the selected file or create a complete file.'}
+                  {displayedAiReply || 'AI suggestions will appear here. Ask it to update the selected file or create a complete file.'}
+                  {aiOperationSummary && permissionMode === 'ask' && (
+                    <div className="mt-3 border-t border-forge-border pt-3">
+                      <p className="text-xs font-semibold">Proposed action</p>
+                      <p className="mt-1 text-xs text-forge-textMuted break-words">{aiOperationSummary}</p>
+                      {['edit', 'create'].includes(aiOperation?.action) && typeof aiOperation.content === 'string' && (
+                        <details className="mt-2">
+                          <summary className="cursor-pointer text-xs">Review proposed file content</summary>
+                          <pre className="mt-2 max-h-48 overflow-auto whitespace-pre-wrap break-words rounded bg-black/20 p-2 text-[10px]">{aiOperation.content}</pre>
+                        </details>
+                      )}
+                      <div className="mt-3 flex gap-2">
+                        <button onClick={() => applyAiReply()} className="flex-1 rounded bg-forge-primary px-2 py-1.5 text-xs font-semibold text-black">Approve</button>
+                        <button onClick={() => setAiReply('Proposal rejected.')} className="rounded border border-forge-border px-2 py-1.5 text-xs">Reject</button>
+                      </div>
+                    </div>
+                  )}
                 </div>
               </div>
             )}
@@ -2241,7 +2480,7 @@ export function Studio({ username }) {
                   <button
                     type="button"
                     onClick={() => applyAiReply()}
-                    disabled={!aiReply || aiReply.startsWith('AI error:')}
+                    disabled={!aiOperationSummary || aiOperation?.action === 'answer' || permissionMode === 'ask'}
                     className="rounded-lg border border-forge-border px-3 py-2 text-sm disabled:opacity-40"
                   >
                     Apply

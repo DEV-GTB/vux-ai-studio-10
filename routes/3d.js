@@ -170,6 +170,64 @@ function hasTripoKey() {
   return Boolean(process.env.TRIPO_API_KEY && process.env.TRIPO_API_KEY !== 'your_tripo_api_key_here');
 }
 
+async function generateThreeWsText(prompt) {
+  // Optional keyless fallback; only used when THREE_FREE_PROVIDER=1
+  if (process.env.THREE_FREE_PROVIDER !== '1') {
+    throw new Error('Free 3D provider disabled.');
+  }
+  const submitResponse = await fetch('https://three.ws/api/3d/generate', {
+    method: 'POST',
+    headers: { 'Content-Type': 'application/json' },
+    body: JSON.stringify({ prompt: String(prompt).slice(0, 1000), format: 'glb' }),
+  });
+  if (!submitResponse.ok) {
+    throw new Error(`Free 3D service returned HTTP ${submitResponse.status}.`);
+  }
+  let payload = {};
+  try { payload = await submitResponse.json(); } catch { payload = {}; }
+
+  const pickGlbUrl = (value) => {
+    if (!value || typeof value !== 'object') return null;
+    const candidates = [
+      value.glbUrl, value.glb_url, value.modelUrl, value.model_url, value.url, value.file,
+      value?.result?.glbUrl, value?.result?.glb_url, value?.output?.model_url,
+    ];
+    for (const c of candidates) {
+      if (typeof c === 'string' && /^https?:\/\//i.test(c)) return c;
+    }
+    return null;
+  };
+
+  let glbUrl = pickGlbUrl(payload);
+  if (!glbUrl) {
+    const pollPath = payload.poll || payload.pollUrl || payload.poll_url;
+    if (typeof pollPath !== 'string') {
+      throw new Error('Free 3D service did not return a model or poll URL.');
+    }
+    for (let attempt = 0; attempt < 45; attempt += 1) {
+      await delay(payload.retryAfter ? Number(payload.retryAfter) * 1000 : 5000);
+      const absolutePoll = pollPath.startsWith('http') ? pollPath : ('https://three.ws' + pollPath);
+      const r = await fetch(absolutePoll);
+      if (!r.ok) throw new Error(`Free 3D polling failed with HTTP ${r.status}.`);
+      payload = await r.json().catch(() => ({}));
+      glbUrl = pickGlbUrl(payload);
+      if (glbUrl) break;
+      if (['failed', 'cancelled', 'error'].includes(String(payload.status || '').toLowerCase())) {
+        throw new Error(payload.error || payload.message || 'Free 3D generation failed.');
+      }
+    }
+  }
+
+  if (!glbUrl) throw new Error('Free 3D service did not return a model URL.');
+  const glbResponse = await fetch(glbUrl);
+  if (!glbResponse.ok) throw new Error(`Free 3D model download failed with HTTP ${glbResponse.status}.`);
+  const glb = Buffer.from(await glbResponse.arrayBuffer());
+  if (glb.length < 12 || glb.toString('ascii', 0, 4) !== 'glTF') {
+    throw new Error('Free 3D service did not return a valid GLB file.');
+  }
+  return glb;
+}
+
 router.post('/', async (req, res) => {
   const { prompt, mode = 'text' } = req.body || {};
   if (mode !== 'text') {
@@ -185,9 +243,23 @@ router.post('/', async (req, res) => {
     try {
       return sendGlb(res, await generateTripoText(prompt.trim()));
     } catch (error) {
-      return send3dError(res, error, 'Tripo text generation');
+      console.error('[3d] Tripo text generation failed.', error?.status || error?.providerCode || error?.message);
+      // Payment/credit issues should be reported directly; network/runtime errors may try configured services.
+      if (error?.providerCode === 2010 || /insufficient credits/i.test(String(error?.message || ''))) {
+        return send3dError(res, error, 'Tripo text generation');
+      }
     }
   }
+
+  // Optional keyless fallback
+  if (process.env.THREE_FREE_PROVIDER === '1') {
+    try {
+      return sendGlb(res, await generateThreeWsText(prompt.trim()));
+    } catch (error) {
+      console.error('[3d] free text generation failed.', error?.message || 'provider-error');
+    }
+  }
+
   try {
     const threeStudioBase = getThreeStudioBase();
     const trellisEndpoint = process.env.TRELLIS_ENDPOINT;
@@ -219,8 +291,13 @@ router.post('/image-to-3d', parseImageUpload, async (req, res) => {
     try {
       return sendGlb(res, await generateTripoImage(req.file));
     } catch (error) {
-      return send3dError(res, error, 'Tripo image-to-3D');
+      const creditError = error?.providerCode === 2010 || /insufficient credits/i.test(String(error?.message || ''));
+      if (creditError) return send3dError(res, error, 'Tripo image-to-3D');
+      console.error('[3d] Tripo image-to-3D failed.', error?.status || error?.providerCode || error?.message);
     }
+  }
+  if (process.env.THREE_FREE_PROVIDER === '1') {
+    // three.ws is text-only; ignore for image jobs
   }
 
   let threeStudioBase;

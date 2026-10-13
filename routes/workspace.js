@@ -1,11 +1,12 @@
 import { Router } from 'express';
 import { lstat, mkdir, readdir, readFile, realpath, rename, rm, writeFile } from 'fs/promises';
+import { homedir } from 'os';
 import path from 'path';
 import { fileURLToPath } from 'url';
 
 const router = Router();
 const __dirname = path.dirname(fileURLToPath(import.meta.url));
-const DEFAULT_WORKSPACE_ROOT = path.resolve(__dirname, '..');
+const DEFAULT_WORKSPACE_ROOT = path.join(homedir(), '.vux-ai-studio', 'workspace');
 const MAX_FILE_BYTES = 1024 * 1024;
 const MAX_WORKSPACE_BYTES = 8 * 1024 * 1024;
 const MAX_WORKSPACE_FILES = 500;
@@ -57,7 +58,9 @@ function assertLocalRequest(req, res, next) {
 
 async function getRoot() {
   const configuredRoot = process.env.STUDIO_WORKSPACE_ROOT || DEFAULT_WORKSPACE_ROOT;
-  return realpath(path.resolve(configuredRoot));
+  const root = path.resolve(configuredRoot);
+  await mkdir(root, { recursive: true });
+  return realpath(root);
 }
 
 function resolveRelativePath(root, value) {

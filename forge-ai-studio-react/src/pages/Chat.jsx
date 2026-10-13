@@ -88,14 +88,6 @@ export function Chat({ setCurrentPage: _setCurrentPage, username }) {
     { icon: '🧪', title: 'Testing', desc: 'Write and optimize tests' },
   ]
 
-  const vuxResponses = [
-    "I can help you with that! Let me analyze your request and provide the best solution...",
-    "Great question! I'm here to help you build better software faster. Here's my approach...",
-    "I understand you need assistance with this. Let me break this down for you...",
-    "That's a great challenge! I can help you tackle this efficiently. Here's what I suggest...",
-    "I'm here to help you succeed! Let me assist you with this..."
-  ]
-
   const scrollToBottom = () => {
     messagesEndRef.current?.scrollIntoView({ behavior: "smooth" })
   }
@@ -267,7 +259,7 @@ export function Chat({ setCurrentPage: _setCurrentPage, username }) {
         {/* Messages */}
         <div className="flex-1 overflow-y-auto p-4 lg:p-6 space-y-4">
           {messages.map((message, index) => (
-            <div key={index} className={`flex ${message.role === 'user' ? 'justify-end' : 'justify-start'}`}>
+            <div key={index} className={`chat-bubble-enter flex ${message.role === 'user' ? 'justify-end' : 'justify-start'}`}>
               <div className={`max-w-full lg:max-w-2xl ${
                 message.role === 'user' 
                   ? 'bg-forge-surfaceHigh border border-forge-border rounded-2xl rounded-tr-sm' 

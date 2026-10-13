@@ -5,25 +5,10 @@ services:
     plan: free
     buildCommand: npm install && npm run build
     startCommand: npm start
+    autoDeploy: true
     envVars:
       - key: NODE_ENV
         value: production
-      - key: PORT
-        value: 3000
-      - key: GEMINI_API_KEY
-        sync: false
-      - key: DEEPSEEK_API_KEY
-        sync: false
-      - key: HF_TOKEN
-        sync: false
-      - key: NEXUS_DEVICE_TOKEN
-        sync: false
-      - key: NEXUS_DEVICE_ID
-        value: NEXUS-001
-      - key: GEMINI_MODEL
-        value: gemini-2.5-flash
-      - key: GEMINI_IMAGE_MODEL
-        value: gemini-2.5-flash-image-preview
       - key: APP_ACCESS_CODE
         sync: false
       - key: ALLOWED_ORIGIN
@@ -32,3 +17,63 @@ services:
         value: "900000"
       - key: RATE_LIMIT_MAX
         value: "40"
+      - key: GEMINI_API_KEY
+        sync: false
+      - key: GEMINI_MODEL
+        sync: false
+      - key: GEMINI_IMAGE_MODEL
+        sync: false
+      - key: GEMINI_VISION_MODEL
+        sync: false
+      - key: GROQ_API_KEY
+        sync: false
+      - key: GROQ_CHAT_MODEL
+        sync: false
+      - key: CLOUDFLARE_API_TOKEN
+        sync: false
+      - key: CLOUDFLARE_ACCOUNT_ID
+        sync: false
+      - key: CLOUDFLARE_CHAT_MODEL
+        sync: false
+      - key: CLOUDFLARE_CODE_MODELS
+        sync: false
+      - key: CLOUDFLARE_IMAGE_MODEL
+        sync: false
+      - key: DEEPSEEK_API_KEY
+        sync: false
+      - key: DEEPSEEK_MODEL
+        sync: false
+      - key: HF_TOKEN
+        sync: false
+      - key: HF_IMAGE_MODEL
+        sync: false
+      - key: HF_CHAT_MODEL
+        sync: false
+      - key: HF_DEEPSEEK_MODEL
+        sync: false
+      - key: HF_VISION_MODEL
+        sync: false
+      - key: HF_VISION_FALLBACK_MODEL
+        sync: false
+      - key: TOGETHER_API_KEY
+        sync: false
+      - key: MISTRAL_API_KEY
+        sync: false
+      - key: TRIPO_API_KEY
+        sync: false
+      - key: TRIPO_MODEL
+        sync: false
+      - key: THREE_STUDIO_URL
+        sync: false
+      - key: TRELLIS_ENDPOINT
+        sync: false
+      - key: NEXUS_DEVICE_ID
+        value: your_device_id_here
+      - key: NEXUS_DEVICE_TOKEN
+        sync: false
+      - key: ESP32_BASE_URL
+        sync: false
+      - key: ESP32_STATE_PATH
+        sync: false
+      - key: ESP32_DIAG_PATH
+        sync: false

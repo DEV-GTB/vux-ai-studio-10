@@ -1,6 +1,25 @@
-import { useState, useEffect } from 'react'
-import { Landing, Home, HomeController, Chat, Studio, Image, Object3D, Settings, Help, Username, Terms } from './pages'
+import { useState, useEffect, lazy, Suspense } from 'react'
+import { Landing, Home, HomeController, Chat, Settings, Help, Username, Terms } from './pages'
+import { Logo } from './components/Logo'
 import './index.css'
+
+// Heavy workspaces (code editor + WebGL) are loaded on demand so the initial
+// page stays light and fast.
+const Studio = lazy(() => import('./pages/Studio.jsx').then((module) => ({ default: module.Studio })))
+const Image = lazy(() => import('./pages/Image.jsx').then((module) => ({ default: module.Image })))
+const Object3D = lazy(() => import('./pages/Object3D.jsx').then((module) => ({ default: module.Object3D })))
+const Vision = lazy(() => import('./features/live-app-vision/VisionWorkspace.jsx').then((module) => ({ default: module.VisionWorkspace })))
+
+function PageLoader() {
+  return (
+    <div className="flex min-h-screen items-center justify-center bg-forge-bg text-forge-text">
+      <div className="flex flex-col items-center gap-4">
+        <Logo className="h-12 w-12 animate-pulse" />
+        <span className="text-sm text-forge-textMuted">Loading workspace…</span>
+      </div>
+    </div>
+  )
+}
 
 const PAGE_PATHS = {
   landing: '/',
@@ -10,6 +29,7 @@ const PAGE_PATHS = {
   studio: '/studio',
   image: '/image-generator',
   object3d: '/3d-object-generator',
+  vision: '/live-app-vision',
   settings: '/settings',
   help: '/help',
   username: '/login',
@@ -25,6 +45,8 @@ const PATH_PAGES = {
   '/image': 'image',
   '/3d-object-generator': 'object3d',
   '/object3d': 'object3d',
+  '/live-app-vision': 'vision',
+  '/vision': 'vision',
   '/settings': 'settings',
   '/help': 'help',
   '/login': 'username',
@@ -98,6 +120,7 @@ function App() {
       case 'studio': return <Studio username={username} />
       case 'image': return <Image setCurrentPage={setCurrentPage} username={username} />
       case 'object3d': return <Object3D setCurrentPage={setCurrentPage} username={username} />
+      case 'vision': return <Vision setCurrentPage={setCurrentPage} username={username} />
       case 'settings': return <Settings setCurrentPage={setCurrentPage} username={username} />
       case 'help': return <Help setCurrentPage={setCurrentPage} username={username} />
       case 'terms': return <Terms onBack={() => setCurrentPage('home')} />
@@ -126,10 +149,8 @@ function App() {
         } bg-forge-surface border-r border-forge-border`}
       >
         {/* Logo */}
-        <div className="flex items-center gap-3 p-6 border-b border-forge-border">
-          <div className="w-8 h-8 rounded-lg bg-gradient-to-br from-forge-primary to-forge-primaryHover flex items-center justify-center flex-shrink-0">
-            <img src="https://lh3.googleusercontent.com/aida-public/AB6AXuALV_T9GseCK2UiieoqsTdT4B_LoAWLwWbgIDHwUmVlWfjZlT0tmTk_KW8WYmXmiWUmZB_57mHYoJLYXgPJYGSqPxHAXZnQ9uYlRvo8lrAhetPrH1LSV7vHNclUKFZ3NCahTLeBPyj_sQQQtm1-foEN-1Y0BvfaZcgXsUGxOuWgpJajnSE6GwKc-EYByMDIqtSqIwZBipW8CgOQnWmJY8tO0250A4XGDAFR8cHvvNzzsYLzJ2IkwHdI8p5jL9A_weVLWw" alt="Vux AI Studio logo" className="h-6 w-6 object-contain" />
-          </div>
+        <div className={`flex items-center gap-3 border-b border-forge-border ${sidebarCollapsed ? 'justify-center p-4' : 'p-6'}`}>
+          <Logo className="h-8 w-8 flex-shrink-0" />
           {!sidebarCollapsed && (
             <div className="flex flex-col">
               <span className="font-display font-bold text-lg text-forge-primary tracking-tight">VUX</span>
@@ -213,6 +234,18 @@ function App() {
             {!sidebarCollapsed && <span className="font-medium">3D Objects</span>}
           </button>
           <button
+            onClick={() => { setCurrentPage('vision'); setMobileMenuOpen(false); }}
+            className={`flex items-center gap-3 px-4 py-3 rounded-lg transition-all ${
+              currentPage === 'vision'
+                ? 'bg-forge-techLight text-forge-tech border-l-2 border-forge-tech'
+                : 'text-forge-textMuted hover:bg-forge-surfaceLow'
+            }`}
+            title="Live App Vision"
+          >
+            <span className="text-xl flex-shrink-0">📸</span>
+            {!sidebarCollapsed && <span className="font-medium">Live App Vision</span>}
+          </button>
+          <button
             onClick={() => { setCurrentPage('settings'); setMobileMenuOpen(false); }}
             className={`flex items-center gap-3 px-4 py-3 rounded-lg transition-all ${
               currentPage === 'settings' 
@@ -270,7 +303,9 @@ function App() {
 
       {/* Main Content */}
       <main className="flex-1 min-w-0 overflow-hidden lg:ml-0">
-        {renderPage()}
+        <div key={currentPage} className="page-enter h-full min-w-0">
+          <Suspense fallback={<PageLoader />}>{renderPage()}</Suspense>
+        </div>
       </main>
     </div>
   )

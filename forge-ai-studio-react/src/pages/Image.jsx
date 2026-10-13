@@ -54,13 +54,13 @@ export function Image({ setCurrentPage: _setCurrentPage, username: _username }) 
     return () => window.removeEventListener('keydown', closeOnEscape)
   }, [lightboxOpen])
 
-  // Generate particle effects
+  // Generate particle effects (deterministic so render stays pure)
   const particles = isGenerating ? Array.from({ length: 20 }, (_, i) => ({
     id: i,
-    x: Math.random() * 100,
-    y: Math.random() * 100,
-    size: Math.random() * 4 + 2,
-    duration: Math.random() * 2 + 1
+    x: (i * 37) % 100,
+    y: (i * 53) % 100,
+    size: (i % 4) + 2,
+    duration: ((i % 5) / 2) + 1
   })) : []
 
   const aspectRatios = [
@@ -94,18 +94,6 @@ export function Image({ setCurrentPage: _setCurrentPage, username: _username }) 
     'Abstract geometric art with vibrant colors and dynamic shapes',
     'Underwater scene with bioluminescent creatures and coral reefs',
   ]
-
-  const createLocalPreview = () => {
-    const safePrompt = prompt.trim().replace(/[<&>"']/g, (character) => ({
-      '<': '&lt;',
-      '>': '&gt;',
-      '&': '&amp;',
-      '"': '&quot;',
-      "'": '&apos;',
-    })[character])
-    const svg = `<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 1200 800"><defs><linearGradient id="bg" x1="0" y1="0" x2="1" y2="1"><stop stop-color="#101d3a"/><stop offset="1" stop-color="#06b6d4"/></linearGradient></defs><rect width="1200" height="800" fill="url(#bg)"/><circle cx="950" cy="150" r="180" fill="#4cd7f6" fill-opacity=".22"/><circle cx="180" cy="720" r="260" fill="#8b5cf6" fill-opacity=".24"/><text x="80" y="130" fill="#dae2fd" font-family="sans-serif" font-size="28" letter-spacing="5">VUX LOCAL PREVIEW</text><text x="80" y="390" fill="white" font-family="sans-serif" font-size="48" font-weight="700">${safePrompt.slice(0, 48)}</text><text x="80" y="450" fill="#dae2fd" font-family="sans-serif" font-size="24">No external generation request was sent.</text></svg>`
-    return `data:image/svg+xml;charset=utf-8,${encodeURIComponent(svg)}`
-  }
 
   const generateImage = async () => {
     if (!prompt.trim()) return

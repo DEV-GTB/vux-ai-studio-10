@@ -3,11 +3,13 @@ import assert from 'node:assert/strict';
 import express from 'express';
 import { createServer } from 'node:http';
 import chatRouter from '../routes/chat.js';
+import imageRouter from '../routes/image.js';
 import visionRouter from '../routes/vision.js';
 
 const app = express();
 app.use(express.json({ limit: '10mb' }));
 app.use('/api/chat', chatRouter);
+app.use('/api/image', imageRouter);
 app.use('/api/vision', visionRouter);
 
 const server = createServer(app);
@@ -20,6 +22,13 @@ const originalEnvironment = {
   GEMINI_MODEL: process.env.GEMINI_MODEL,
   DEEPSEEK_API_KEY: process.env.DEEPSEEK_API_KEY,
   DEEPSEEK_MODEL: process.env.DEEPSEEK_MODEL,
+  GROQ_API_KEY: process.env.GROQ_API_KEY,
+  GROQ_CHAT_MODEL: process.env.GROQ_CHAT_MODEL,
+  CLOUDFLARE_API_TOKEN: process.env.CLOUDFLARE_API_TOKEN,
+  CLOUDFLARE_ACCOUNT_ID: process.env.CLOUDFLARE_ACCOUNT_ID,
+  CLOUDFLARE_CHAT_MODEL: process.env.CLOUDFLARE_CHAT_MODEL,
+  CLOUDFLARE_CODE_MODELS: process.env.CLOUDFLARE_CODE_MODELS,
+  CLOUDFLARE_IMAGE_MODEL: process.env.CLOUDFLARE_IMAGE_MODEL,
   HF_CHAT_MODEL: process.env.HF_CHAT_MODEL,
   HF_DEEPSEEK_MODEL: process.env.HF_DEEPSEEK_MODEL,
   HF_VISION_MODEL: process.env.HF_VISION_MODEL,
@@ -45,6 +54,13 @@ beforeEach(() => {
   process.env.GEMINI_MODEL = 'gemma-4-31b-it';
   process.env.DEEPSEEK_API_KEY = '';
   process.env.DEEPSEEK_MODEL = 'deepseek-flash';
+  process.env.GROQ_API_KEY = '';
+  process.env.GROQ_CHAT_MODEL = 'llama-3.3-70b-versatile';
+  process.env.CLOUDFLARE_API_TOKEN = '';
+  process.env.CLOUDFLARE_ACCOUNT_ID = '';
+  process.env.CLOUDFLARE_CHAT_MODEL = '@cf/moonshotai/kimi-k2.7-code';
+  process.env.CLOUDFLARE_CODE_MODELS = '@cf/qwen/qwen3.8-27b,@cf/google/gemma-4-26b-a4b-it,@cf/qwen/qwq-32b';
+  process.env.CLOUDFLARE_IMAGE_MODEL = '@cf/black-forest-labs/flux-1-schnell';
   process.env.HF_CHAT_MODEL = 'google/gemma-test';
   process.env.HF_DEEPSEEK_MODEL = 'deepseek-ai/deepseek-test';
   delete process.env.HF_VISION_MODEL;
@@ -82,6 +98,97 @@ test('ordinary chat prefers the configured Hugging Face chat route', async () =>
   assert.equal((await response.json()).text, 'A concise answer.');
   assert.equal(requestedModel, 'google/gemma-4-12B-it');
   assert.match(systemPrompt, /Vux AI Studio/);
+});
+
+test('ordinary chat prefers Groq when its server key is configured', async () => {
+  process.env.GROQ_API_KEY = 'test-groq-key';
+  let requestedUrl = '';
+  let submitted;
+  globalThis.fetch = async (url, options) => {
+    requestedUrl = String(url);
+    assert.equal(options.headers.Authorization, 'Bearer test-groq-key');
+    submitted = JSON.parse(options.body);
+    return jsonResponse({ choices: [{ message: { content: 'A faster answer.' } }] });
+  };
+
+  const response = await ask([{ role: 'user', content: 'What is a closure?' }]);
+  assert.equal(response.status, 200);
+  assert.equal((await response.json()).text, 'A faster answer.');
+  assert.equal(requestedUrl, 'https://api.groq.com/openai/v1/chat/completions');
+  assert.equal(submitted.model, 'llama-3.3-70b-versatile');
+  assert.equal(submitted.stream, false);
+});
+
+test('coding chat prefers Cloudflare Workers AI when configured', async () => {
+  process.env.CLOUDFLARE_API_TOKEN = 'test-cloudflare-token';
+  process.env.CLOUDFLARE_ACCOUNT_ID = 'test-account-id';
+  let requestedUrl = '';
+  let submitted;
+  globalThis.fetch = async (url, options) => {
+    requestedUrl = String(url);
+    submitted = JSON.parse(options.body);
+    return jsonResponse({ result: { response: 'Cloudflare code answer.' } });
+  };
+
+  const response = await ask([{ role: 'user', content: 'Debug this JavaScript function.' }]);
+  assert.equal(response.status, 200, `Cloudflare test intercepted ${requestedUrl}`);
+  assert.equal((await response.json()).text, 'Vux AI Studio code answer.');
+  assert.ok(decodeURIComponent(requestedUrl).includes('/accounts/test-account-id/ai/run/@cf/qwen/qwen3.8-27b'));
+  assert.equal(submitted.max_tokens, 2048);
+  assert.equal(submitted.messages[0].role, 'system');
+});
+
+test('coding chat tries the next configured Cloudflare model when the first is unavailable', async () => {
+  process.env.CLOUDFLARE_API_TOKEN = 'test-cloudflare-token';
+  process.env.CLOUDFLARE_ACCOUNT_ID = 'test-account-id';
+  process.env.CLOUDFLARE_CODE_MODELS = '@cf/qwen/qwen3.8-27b,@cf/google/gemma-4-26b-a4b-it';
+  const requestedUrls = [];
+  globalThis.fetch = async (url) => {
+    const requestedUrl = decodeURIComponent(String(url));
+    requestedUrls.push(requestedUrl);
+    if (requestedUrl.includes('@cf/qwen/qwen3.8-27b')) {
+      return jsonResponse({ errors: [{ message: 'Model unavailable.' }] }, 404);
+    }
+    return jsonResponse({ result: { response: 'Gemma coding answer.' } });
+  };
+
+  const response = await ask([{ role: 'user', content: 'Debug this JavaScript function.' }]);
+  assert.equal(response.status, 200);
+  assert.equal((await response.json()).text, 'Gemma coding answer.');
+  assert.ok(requestedUrls[0].includes('@cf/qwen/qwen3.8-27b'));
+  assert.ok(requestedUrls[1].includes('@cf/google/gemma-4-26b-a4b-it'));
+});
+
+test('image generation uses Cloudflare FLUX and returns decoded image bytes', async () => {
+  process.env.HF_TOKEN = '';
+  process.env.CLOUDFLARE_API_TOKEN = 'test-cloudflare-token';
+  process.env.CLOUDFLARE_ACCOUNT_ID = 'test-account-id';
+  const generatedBytes = Buffer.from('mock image bytes');
+  let requestedUrl = '';
+  let submitted;
+  globalThis.fetch = async (url, options) => {
+    requestedUrl = String(url);
+    submitted = JSON.parse(options.body);
+    return jsonResponse({
+      result: { image: generatedBytes.toString('base64') },
+      success: true,
+      errors: [],
+      messages: [],
+    });
+  };
+
+  const response = await nativeFetch(`${baseUrl}/api/image`, {
+    method: 'POST',
+    headers: { 'Content-Type': 'application/json' },
+    body: JSON.stringify({ prompt: 'a precise blue robot', quality: 'ultra' }),
+  });
+
+  assert.equal(response.status, 200, `Cloudflare test intercepted ${requestedUrl}`);
+  assert.equal(response.headers.get('content-type'), 'image/jpeg');
+  assert.deepEqual(Buffer.from(await response.arrayBuffer()), generatedBytes);
+  assert.ok(decodeURIComponent(requestedUrl).includes('/ai/run/@cf/black-forest-labs/flux-1-schnell'));
+  assert.match(submitted.prompt, /a precise blue robot/);
+  assert.equal(submitted.steps, 8);
 });
 
 test('identity questions return immediately without calling an AI provider', async () => {
@@ -122,7 +229,7 @@ test('coding requests prefer the configured DeepSeek API key', async () => {
 
   const response = await ask([{ role: 'user', content: 'Debug this JavaScript function.' }]);
   assert.equal(response.status, 200);
-  assert.equal((await response.json()).text, 'Direct DeepSeek answer.');
+  assert.equal((await response.json()).text, 'Direct Vux AI Studio answer.');
   assert.equal(requestedUrl, 'https://api.deepseek.com/chat/completions');
   assert.equal(requestBody.model, 'deepseek-flash');
   assert.deepEqual(requestBody.thinking, { type: 'enabled' });

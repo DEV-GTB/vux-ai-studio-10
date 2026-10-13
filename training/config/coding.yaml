@@ -1,0 +1,11 @@
+base_model: Qwen/Qwen2.5-0.5B-Instruct   # use 1.5B+ on GPU
+train_file: data/train/coding.jsonl
+valid_file: data/validation/coding.jsonl
+output_dir: outputs/coding/adapter
+max_length: 512
+epochs: 1
+learning_rate: 1e-4
+batch_size: 1
+gradient_accumulation: 8
+lora_r: 8
+use_4bit: false

@@ -55,6 +55,7 @@ test('device status is authenticated, cached in memory, and normalized for the d
   });
   const result = await readback.json();
   assert.equal(readback.status, 200);
+  assert.equal(readback.headers.get('cache-control'), 'no-store');
   assert.equal(result.device.rooms.length, 2);
   assert.equal(result.device.rooms[0].fanOn, true);
   assert.equal(result.device.rooms[1].lightOn, true);

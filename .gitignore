@@ -10,3 +10,13 @@ dist/
 .DS_Store
 .vscode/
 coverage/
+data/vision/
+data/train/
+data/validation/
+data/test/
+outputs/
+retrieval/index/
+*.pkl
+*.db
+*.sqlite
+.vux-ai-studio/

@@ -1,7 +1,6 @@
 import { useState, useRef, useEffect, Suspense } from 'react'
 import { Canvas } from '@react-three/fiber'
 import { Bounds, OrbitControls, Environment, useGLTF, ContactShadows } from '@react-three/drei'
-import * as THREE from 'three'
 import { apiUrl } from '../lib/api.js'
 
 // 3D Model Viewer Component
@@ -65,9 +64,7 @@ export function Object3D({ setCurrentPage: _setCurrentPage, username: _username 
   const [chatInput, setChatInput] = useState('')
   const [isChatThinking, setIsChatThinking] = useState(false)
   const [previewLightboxOpen, setPreviewLightboxOpen] = useState(false)
-  const [previewZoom, setPreviewZoom] = useState(1)
   const fileInputRef = useRef(null)
-  const canvasRef = useRef(null)
   const modelObjectUrls = useRef(new Set())
 
   useEffect(() => () => {

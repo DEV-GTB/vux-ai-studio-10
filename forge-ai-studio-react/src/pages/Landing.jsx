@@ -1,16 +1,19 @@
+import { Logo } from '../components/Logo'
+import { ParticleField } from '../components/ParticleField'
+
 export function Landing({ onGetStarted, onTerms }) {
   return (
     <div className="min-h-screen bg-background text-on-background selection:bg-primary/30 overflow-x-hidden" style={{ fontFamily: 'Inter, sans-serif' }}>
       {/* TopNavBar */}
       <header className="fixed top-0 w-full z-50 bg-background/80 backdrop-blur-md border-b border-outline-variant/20 transition-all duration-200 ease-in-out">
         <div className="flex justify-between items-center px-margin-mobile md:px-margin-desktop h-16 max-w-[1280px] mx-auto w-full">
-          <div className="flex items-center h-10 w-auto">
-            <img 
-              src="https://lh3.googleusercontent.com/aida-public/AB6AXuALV_T9GseCK2UiieoqsTdT4B_LoAWLwWbgIDHwUmVlWfjZlT0tmTk_KW8WYmXmiWUmZB_57mHYoJLYXgPJYGSqPxHAXZnQ9uYlRvo8lrAhetPrH1LSV7vHNclUKFZ3NCahTLeBPyj_sQQQtm1-foEN-1Y0BvfaZcgXsUGxOuWgpJajnSE6GwKc-EYByMDIqtSqIwZBipW8CgOQnWmJY8tO0250A4XGDAFR8cHvvNzzsYLzJ2IkwHdI8p5jL9A_weVLWw" 
-              alt="Vux AI Studio Logo" 
-              className="h-full w-auto object-contain"
-            />
-          </div>
+          <button onClick={onGetStarted} className="flex items-center gap-2.5 h-10 group" aria-label="Vux AI Studio home">
+            <Logo className="h-8 w-8 transition-transform duration-300 group-hover:scale-105" />
+            <span className="flex flex-col items-start leading-none">
+              <span className="font-display font-bold text-base tracking-tight text-on-background">VUX</span>
+              <span className="text-[10px] tracking-[0.2em] text-on-surface-variant">AI STUDIO</span>
+            </span>
+          </button>
           
           <nav className="hidden md:flex gap-lg">
             <a className="text-on-surface-variant hover:text-primary transition-colors duration-200" href="#">Platform</a>
@@ -34,6 +37,7 @@ export function Landing({ onGetStarted, onTerms }) {
       <main className="flex-grow flex flex-col justify-center items-center px-margin-mobile md:px-margin-desktop py-2xl lg:py-[120px] pt-[120px] max-w-[1280px] mx-auto w-full relative">
         {/* Background decorative elements */}
         <div className="absolute inset-0 overflow-hidden pointer-events-none -z-10">
+          <ParticleField className="absolute inset-0 h-full w-full opacity-70" />
           <div className="absolute top-1/4 left-1/4 w-96 h-96 bg-primary/5 rounded-full blur-3xl"></div>
           <div className="absolute bottom-1/4 right-1/4 w-[500px] h-[500px] bg-surface-container/50 rounded-full blur-3xl"></div>
         </div>

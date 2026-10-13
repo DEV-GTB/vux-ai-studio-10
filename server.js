@@ -8,6 +8,7 @@ import { fileURLToPath } from 'url';
 
 import chatRouter from './routes/chat.js';
 import visionRouter from './routes/vision.js';
+import liveVisionRouter from './routes/liveVision.js';
 import imageRouter from './routes/image.js';
 import object3dRouter from './routes/3d.js';
 import terminalRouter from './routes/terminal.js';
@@ -16,7 +17,9 @@ import workspaceRouter from './routes/workspace.js';
 import iotRouter from './routes/iot.js';
 import esp32Router from './routes/esp32.js';
 import deviceRouter from './routes/device.js';
-
+import trainingRouter from './routes/training.js';
+import knowledgeRouter from './routes/knowledge.js';
+import { seedDefaultKnowledge } from './lib/knowledgeStore.js';
 const __filename = fileURLToPath(import.meta.url);
 const __dirname = path.dirname(__filename);
 
@@ -32,15 +35,15 @@ app.use(
     contentSecurityPolicy: {
       directives: {
         defaultSrc: ["'self'"],
-        scriptSrc: ["'self'", "'unsafe-inline'", "'unsafe-eval'", 'https://cdn.tailwindcss.com', 'https://cdnjs.cloudflare.com'],
-        styleSrc: ["'self'", "'unsafe-inline'", 'https://fonts.googleapis.com', 'https://cdnjs.cloudflare.com'],
-        fontSrc: ["'self'", 'https://fonts.gstatic.com'],
-        imgSrc: ["'self'", 'data:', 'https://lh3.googleusercontent.com', 'blob:'],
+        scriptSrc: ["'self'", "'unsafe-inline'", "'unsafe-eval'", 'https://cdn.tailwindcss.com', 'https://cdnjs.cloudflare.com', 'https://cdn.jsdelivr.net'],
+        styleSrc: ["'self'", "'unsafe-inline'", 'https://fonts.googleapis.com', 'https://cdnjs.cloudflare.com', 'https://cdn.jsdelivr.net'],
+        fontSrc: ["'self'", 'data:', 'https://fonts.gstatic.com', 'https://cdn.jsdelivr.net'],
+        imgSrc: ["'self'", 'data:', 'blob:'],
         mediaSrc: ["'self'", 'data:'],
-        connectSrc: ["'self'", 'ws:', 'wss:'],
+        connectSrc: ["'self'", 'ws:', 'wss:', 'https://cdn.jsdelivr.net'],
         objectSrc: ["'none'"],
         baseUri: ["'none'"],
-        workerSrc: ["'self'", 'blob:'],
+        workerSrc: ["'self'", 'blob:', 'https://cdn.jsdelivr.net'],
       },
     },
   })
@@ -104,14 +107,18 @@ if (process.env.VERCEL === '1' || process.env.NODE_ENV === 'production') {
 
 app.use('/api/chat', chatRouter);
 app.use('/api/vision', visionRouter);
+app.use('/api/vision/app', liveVisionRouter);
 app.use('/api/image', imageRouter);
 app.use('/api/3d', object3dRouter);
-app.use('/api/terminal', terminalRouter);
+app.use('/api/training', trainingRouter);
+app.use('/api/knowledge', knowledgeRouter);app.use('/api/terminal', terminalRouter);
 app.use('/api/project', projectRouter);
 app.use('/api/workspace', workspaceRouter);
 app.use('/api/device', deviceRouter);
 app.use('/api/v1/iot/esp32', esp32Router);
 app.use('/api/v1/iot', iotRouter);
+
+try { seedDefaultKnowledge(); } catch (error) { console.warn('[knowledge] seed failed:', error?.message || error); }
 
 const reactDist = path.join(__dirname, 'forge-ai-studio-react', 'dist');
 const legacyPublic = path.join(__dirname, 'public');

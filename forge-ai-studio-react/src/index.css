@@ -214,6 +214,20 @@ body {
   }
 }
 
+.page-enter,
+.chat-bubble-enter,
+.panel-enter {
+  animation: fadeIn 0.24s ease both;
+}
+
+@media (prefers-reduced-motion: reduce) {
+  .page-enter,
+  .chat-bubble-enter,
+  .panel-enter {
+    animation: none;
+  }
+}
+
 .fade-in {
   animation: fadeIn 0.3s ease-out;
 }
