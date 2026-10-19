@@ -1,6 +1,7 @@
 import { Router } from 'express';
 import { GENERIC_ERROR } from '../lib/identity.js';
 import { getCloudflareAccounts, getModelList, runCloudflareModel, extractImagePayload, extractAudioPayload, extractVideoPayload, extractTranscription, extractGeneratedText, extractEmbeddings } from '../lib/cloudflare.js';
+import { generate, CAPABILITY } from '../lib/aiProviders.js';
 
 const router = Router();
 
@@ -34,28 +35,15 @@ router.post('/', async (req, res) => {
     return res.status(503).json({ error: 'Embedding generation is not configured. Add Cloudflare API credentials to the server environment.' });
   }
 
-  const providers = [];
-  for (const modelName of getCloudflareEmbeddingModels()) {
-    for (const account of getCloudflareAccounts()) {
-      providers.push({
-        label: `Cloudflare ${modelName}`,
-        run: () => generateWithCloudflareEmbedding(modelName, input, account),
-      });
-    }
+  try {
+    const { result } = await generate(CAPABILITY.EMBEDDINGS, {
+      texts: input,
+      account: getCloudflareAccounts()[0],
+    });
+    return res.json({ embeddings: result.embeddings });
+  } catch (error) {
+    return sendEmbeddingError(res, error);
   }
-
-  let failure;
-  for (const provider of providers) {
-    try {
-      const result = await provider.run();
-      return res.json({ embeddings: result.embeddings });
-    } catch (error) {
-      failure = error;
-      console.error(`[embeddings] ${provider.label} failed:`, error?.message || error);
-    }
-  }
-
-  return sendEmbeddingError(res, failure);
 });
 
 export default router;

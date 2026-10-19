@@ -1,6 +1,7 @@
 import { Router } from 'express';
 import { GENERIC_ERROR } from '../lib/identity.js';
 import { getCloudflareAccounts, getModelList, runCloudflareModel, extractImagePayload, extractAudioPayload, extractVideoPayload, extractTranscription, extractGeneratedText, extractEmbeddings, extractMediaPayload } from '../lib/cloudflare.js';
+import { generate, CAPABILITY } from '../lib/aiProviders.js';
 
 const router = Router();
 
@@ -200,35 +201,19 @@ async function handleTextToSpeech(req, res) {
     outputFormat,
   };
 
-  const providers = [];
-  if (getCartesiaApiKey()) {
-    providers.push({
-      label: 'Cartesia',
-      run: () => generateWithCartesiaTextToSpeech(input),
+  try {
+    const { result } = await generate(CAPABILITY.TTS, {
+      text: input.text,
+      voice: input.voiceId,
+      account: getCloudflareAccounts()[0],
+      bodyFor: (modelName) => buildCloudflareTextToSpeechRequest(modelName, input),
+      cartesia: () => generateWithCartesiaTextToSpeech(input),
     });
+    const audioBase64 = result.buffer.toString('base64');
+    return res.json({ audio: `data:${result.contentType || 'audio/mpeg'};base64,${audioBase64}` });
+  } catch (error) {
+    return sendVoiceError(res, error);
   }
-  for (const modelName of getCloudflareTextToSpeechModels()) {
-    for (const account of getCloudflareAccounts()) {
-      providers.push({
-        label: `Cloudflare ${modelName}`,
-        run: () => generateWithCloudflareTextToSpeech(modelName, input, account),
-      });
-    }
-  }
-
-  let failure;
-  for (const provider of providers) {
-    try {
-      const result = await provider.run();
-      const audioBase64 = result.buffer.toString('base64');
-      return res.json({ audio: `data:${result.contentType};base64,${audioBase64}` });
-    } catch (error) {
-      failure = error;
-      console.error(`[tts] ${provider.label} failed:`, error?.message || error);
-    }
-  }
-
-  return sendVoiceError(res, failure);
 }
 
 // POST /api/stt  { audioBase64, audioUrl }
@@ -248,28 +233,17 @@ async function handleSpeechToText(req, res) {
     audioUrl: hasUrl ? audioUrl.trim() : '',
   };
 
-  const providers = [];
-  for (const modelName of getCloudflareSpeechToTextModels()) {
-    for (const account of getCloudflareAccounts()) {
-      providers.push({
-        label: `Cloudflare ${modelName}`,
-        run: () => generateWithCloudflareSpeechToText(modelName, input, account),
-      });
-    }
+  try {
+    const { result } = await generate(CAPABILITY.STT, {
+      audioBase64: input.audioBase64,
+      audioUrl: input.audioUrl,
+      account: getCloudflareAccounts()[0],
+      bodyFor: (modelName) => buildCloudflareSpeechToTextRequest(modelName, input),
+    });
+    return res.json({ text: result.text });
+  } catch (error) {
+    return sendVoiceError(res, error);
   }
-
-  let failure;
-  for (const provider of providers) {
-    try {
-      const result = await provider.run();
-      return res.json({ text: result.text });
-    } catch (error) {
-      failure = error;
-      console.error(`[stt] ${provider.label} failed:`, error?.message || error);
-    }
-  }
-
-  return sendVoiceError(res, failure);
 }
 
 router.post('/tts', handleTextToSpeech);

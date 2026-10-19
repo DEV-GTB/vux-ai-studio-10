@@ -2,6 +2,7 @@ import { Router } from 'express';
 import { GoogleGenAI } from '@google/genai';
 import { GENERIC_ERROR } from '../lib/identity.js';
 import { getCloudflareAccounts, getModelList, runCloudflareModel, splitModelList, extractImagePayload, extractAudioPayload, extractVideoPayload, extractTranscription, extractGeneratedText, extractEmbeddings, extractMediaPayload } from '../lib/cloudflare.js';
+import { generate, CAPABILITY } from '../lib/aiProviders.js';
 
 const router = Router();
 
@@ -96,37 +97,18 @@ router.post('/', async (req, res) => {
   }
 
   const configuredDuration = duration || '10s';
-  const providers = [];
 
-  for (const modelName of getCloudflareVideoModels()) {
-    for (const account of getCloudflareAccounts(false)) {
-      providers.push({
-        label: `Cloudflare ${modelName}`,
-        run: () => generateWithCloudflareVideo(modelName, prompt, configuredDuration, account),
-      });
-    }
+  try {
+    const { result } = await generate(CAPABILITY.VIDEO, {
+      prompt,
+      duration: configuredDuration,
+      account: getCloudflareAccounts(false)[0],
+    });
+    return res.json({ video: `data:${result.contentType || 'video/mp4'};base64,${result.buffer.toString('base64')}` });
+  } catch (error) {
+    console.error('[video] request failed:', error?.message || 'provider-error');
+    return res.status(502).json({ error: GENERIC_ERROR.video });
   }
-
-  if (process.env.GEMINI_API_KEY) {
-    const models = getGeminiVideoModels();
-    for (const modelName of models) {
-      providers.push({
-        label: `Gemini ${modelName}`,
-        run: () => generateWithGeminiVideo(modelName, prompt, configuredDuration),
-      });
-    }
-  }
-
-  for (const provider of providers) {
-    try {
-      const result = await provider.run();
-      return res.json({ video: `data:${result.contentType};base64,${result.buffer.toString('base64')}` });
-    } catch (error) {
-      console.error(`[video] ${provider.label} failed:`, error?.message || error);
-    }
-  }
-
-  return res.status(502).json({ error: GENERIC_ERROR.video });
 });
 
 export default router;

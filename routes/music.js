@@ -1,6 +1,7 @@
 import { Router } from 'express';
 import { GENERIC_ERROR } from '../lib/identity.js';
 import { getCloudflareAccounts, getModelList, runCloudflareModel, extractImagePayload, extractAudioPayload, extractVideoPayload, extractTranscription, extractGeneratedText, extractEmbeddings, extractMediaPayload } from '../lib/cloudflare.js';
+import { generate, CAPABILITY } from '../lib/aiProviders.js';
 
 const router = Router();
 
@@ -76,29 +77,16 @@ router.post('/', async (req, res) => {
     lyricsOptimizer: lyricsOptimizer === true,
   };
 
-  const providers = [];
-  for (const modelName of getCloudflareMusicModels()) {
-    for (const account of getCloudflareAccounts()) {
-      providers.push({
-        label: `Cloudflare ${modelName}`,
-        run: () => generateWithCloudflareMusic(modelName, request, account),
-      });
-    }
+  try {
+    const { result } = await generate(CAPABILITY.MUSIC, {
+      account: getCloudflareAccounts()[0],
+      bodyFor: (modelName) => buildCloudflareMusicRequest(modelName, request),
+    });
+    const audioBase64 = result.buffer.toString('base64');
+    return res.json({ audio: `data:${result.contentType || 'audio/mpeg'};base64,${audioBase64}` });
+  } catch (error) {
+    return sendMusicError(res, error);
   }
-
-  let failure;
-  for (const provider of providers) {
-    try {
-      const result = await provider.run();
-      const audioBase64 = result.buffer.toString('base64');
-      return res.json({ audio: `data:${result.contentType};base64,${audioBase64}` });
-    } catch (error) {
-      failure = error;
-      console.error(`[music] ${provider.label} failed:`, error?.message || error);
-    }
-  }
-
-  return sendMusicError(res, failure);
 });
 
 export default router;

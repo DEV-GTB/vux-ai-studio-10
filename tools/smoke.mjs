@@ -11,7 +11,12 @@ const results = [];
 async function check(name, path, body, validate) {
   const started = Date.now();
   try {
-    const response = await fetch(`${base}${path}`, {
+    // A path that is a full address is checked directly, so a provider that
+    // needs no credential can be checked too.
+    const isAddress = /^https?:\/\//.test(path);
+    const url = isAddress ? path : `${base}${path}`;
+
+    const response = await fetch(url, isAddress ? {} : {
       method: 'POST',
       headers: { 'Content-Type': 'application/json' },
       body: JSON.stringify(body),
@@ -90,6 +95,13 @@ await check('stt', '/api/stt', {
 await check('image', '/api/image', { prompt: 'A simple blue square on white' }, (response, payload) => {
   if (response.status !== 200) return `HTTP ${response.status}`;
   if (!String(response.headers.get('content-type') || '').startsWith('image/')) return 'not an image';
+  return null;
+});
+
+// The free image source needs no credential, so it is the last resort when
+// every configured provider is out of quota.
+await check('free image', 'https://image.pollinations.ai/prompt/a%20small%20blue%20cube?width=256&height=256&nologo=true', null, (response) => {
+  if (!response.ok) return `HTTP ${response.status}`;
   return null;
 });
 

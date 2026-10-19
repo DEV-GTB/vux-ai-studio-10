@@ -184,7 +184,7 @@ test('image generation uses Cloudflare FLUX and returns decoded image bytes', as
   });
 
   assert.equal(response.status, 200, `Cloudflare test intercepted ${requestedUrl}`);
-  assert.equal(response.headers.get('content-type'), 'image/jpeg');
+  assert.equal(response.headers.get('content-type'), 'image/png');
   assert.deepEqual(Buffer.from(await response.arrayBuffer()), generatedBytes);
   assert.ok(decodeURIComponent(requestedUrl).includes('/ai/run/'), 'the image model must run on the service');
   assert.match(submitted.prompt, /a precise blue robot/);

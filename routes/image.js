@@ -1,5 +1,6 @@
 import { Router } from 'express';
-import { getCloudflareAccounts, getModelList, runCloudflareModel, extractMediaPayload } from '../lib/cloudflare.js';
+import { getCloudflareAccounts } from '../lib/cloudflare.js';
+import { generate, CAPABILITY } from '../lib/aiProviders.js';
 import Cloudflare from 'cloudflare';
 import { InferenceClient } from '@huggingface/inference';
 import { GENERIC_ERROR } from '../lib/identity.js';
@@ -109,94 +110,43 @@ router.post('/', async (req, res) => {
 
   try {
     const styledPrompt = `${prompt.trim()}, ${String(stylePreset).slice(0, 40)} style`;
-    if (hasCloudflare) {
-      // An edit request uses the models that can take a reference image; a
-      // text request uses the models that generate one. Every model is tried
-      // in order, because a model can be unavailable on a given account.
-      const modelList = referenceImage ? getModelList('imageEdit') : getModelList('image');
-      for (const cloudflareModel of modelList) {
-        try {
-          const cloudflarePayload = await runCloudflareModel(
-            cloudflareModel,
-            buildCloudflareImageRequest(cloudflareModel, {
-              prompt: styledPrompt.slice(0, 2048),
-              instruction,
-              reference: referenceImage,
-              target,
-              enhanceDetails: enhanceDetails === true,
-              resolution: getDimensions(aspectRatio).height >= getDimensions(aspectRatio).width ? '2K' : '1K',
-              steps: Math.min(getInferenceSteps(quality), 8),
-            }),
-            cloudflareAccounts[0],
-          );
-          const { base64, contentType } = extractMediaPayload(cloudflarePayload, { contentType: 'image/jpeg' });
-          if (!base64) throw new Error('The image service returned no image.');
-          res.setHeader('Content-Type', contentType);
-          res.setHeader('Cache-Control', 'no-store');
-          return res.send(Buffer.from(base64, 'base64'));
-        } catch (error) {
-          console.error(`[image] ${cloudflareModel} failed:`, error?.message || 'provider-error');
-        }
-      }
-    }
+    const { width, height } = getDimensions(aspectRatio);
+    const capability = referenceImage ? CAPABILITY.IMAGE_EDIT : CAPABILITY.IMAGE;
 
-    if (hasGemini) {
-      try {
-        const geminiImage = await generateGeminiImage(styledPrompt.slice(0, 4000));
-        res.setHeader('Content-Type', geminiImage.mimeType);
-        res.setHeader('Cache-Control', 'no-store');
-        return res.send(geminiImage.buffer);
-      } catch (error) {
-        console.error('[image] Gemini image generation failed:', error?.message || 'provider-error');
-        if (!hasHuggingFace) {
-          // try free Pollinations before giving up
-        }
-      }
-    }
-
-    try {
-      const { width, height } = getDimensions(aspectRatio);
-      const pollinationsImage = await generatePollinationsImage(styledPrompt.slice(0, 1500), width, height);
-      res.setHeader('Content-Type', pollinationsImage.mimeType);
-      res.setHeader('Cache-Control', 'no-store');
-      return res.send(pollinationsImage.buffer);
-    } catch (pollinationsError) {
-      console.error('[image] Pollinations fallback failed:', pollinationsError?.message || 'provider-error');
-      if (!hasHuggingFace) {
-        return res.status(502).json({ error: GENERIC_ERROR.image });
-      }
-    }
-
-    const client = new InferenceClient(process.env.HF_TOKEN);
-    const imageBlob = await client.textToImage({
-      model: process.env.HF_IMAGE_MODEL || 'black-forest-labs/FLUX.1-Krea-dev',
-      inputs: styledPrompt,
-      provider: 'auto',
-      parameters: {
-        ...getDimensions(aspectRatio),
-        num_inference_steps: getInferenceSteps(quality),
-      },
+    // The unified layer tries every configured provider in order, and the
+    // free source catches the request when none of them can.
+    const { result } = await generate(capability, {
+      prompt: styledPrompt.slice(0, 2048),
+      instruction,
+      reference: referenceImage,
+      target,
+      enhanceDetails: enhanceDetails === true,
+      resolution: height >= width ? '2K' : '1K',
+      width,
+      height,
+      aspectRatio,
+      steps: Math.min(getInferenceSteps(quality), 8),
+      account: cloudflareAccounts[0],
+      bodyFor: (modelName) => buildCloudflareImageRequest(modelName, {
+        prompt: styledPrompt.slice(0, 2048),
+        instruction,
+        reference: referenceImage,
+        target,
+        enhanceDetails: enhanceDetails === true,
+        resolution: height >= width ? '2K' : '1K',
+      }),
     });
-    const contentType = imageBlob.type || 'image/png';
-    if (!contentType.startsWith('image/')) {
-      console.error('[image] Hugging Face returned an unsupported content type:', contentType);
-      return res.status(502).json({ error: GENERIC_ERROR.image });
-    }
 
-    const imageBuffer = Buffer.from(await imageBlob.arrayBuffer());
-    if (!imageBuffer.length) {
-      return res.status(502).json({ error: GENERIC_ERROR.image });
-    }
-
-    res.setHeader('Content-Type', contentType);
+    res.setHeader('Content-Type', result.contentType || 'image/png');
     res.setHeader('Cache-Control', 'no-store');
-    return res.send(imageBuffer);
+    return res.send(result.buffer);
   } catch (error) {
+    console.error('[image] generation failed:', error?.message || 'provider-error');
     const failureText = String(error?.message || '').toLowerCase();
-    const creditsDepleted = failureText.includes('depleted your monthly included credits') || failureText.includes('purchase pre-paid credits');
-    console.error('[image] generation failed:', error?.status || (creditsDepleted ? 'credits-depleted' : error?.message || 'unknown error'));
+    const creditsDepleted = failureText.includes('depleted your monthly included credits')
+      || failureText.includes('purchase pre-paid credits');
     if (creditsDepleted) {
-      return res.status(402).json({ error: 'Hugging Face image-generation credits are depleted. Add credits or wait for your monthly allowance to renew.' });
+      return res.status(402).json({ error: 'Image-generation credits are depleted. Add credits or wait for your monthly allowance to renew.' });
     }
     const status = error?.status === 429 ? 429 : error?.status === 503 ? 503 : 502;
     return res.status(status).json({ error: status === 429 ? 'Image generation is busy. Please try again shortly.' : GENERIC_ERROR.image });

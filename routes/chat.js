@@ -1,10 +1,16 @@
 import { Router } from 'express';
 import Cloudflare from 'cloudflare';
 import { IDENTITY_PROMPT, scrubIdentity, GENERIC_ERROR, getIdentityResponse } from '../lib/identity.js';
+import { withTimeout } from '../lib/providers.js';
 import { INDIA_KNOWLEDGE_PROMPT } from '../lib/knowledge.js';
 import { searchKnowledge } from '../lib/knowledgeStore.js';
 
 const router = Router();
+
+// A slow service is replaced rather than waited on. A chat answer that
+// arrives late is worth nothing to the person waiting for it.
+const CHAT_TIMEOUT_MS = Number(process.env.CHAT_TIMEOUT_MS) || 15000;
+const CODING_TIMEOUT_MS = Number(process.env.CODING_TIMEOUT_MS) || 45000;
 const DEFAULT_CLOUDFLARE_CODE_MODELS = [
   '@cf/meta/llama-3.3-70b-instruct-fp8-fast',
 ];
@@ -388,6 +394,7 @@ router.post('/', async (req, res) => {
       console.warn('[chat] Gemini route failed; trying the next configured service:', error?.status || 'provider-error');
     }
   }
+
 
   if (hasMistral) {
     try {
