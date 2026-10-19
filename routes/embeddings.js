@@ -31,8 +31,8 @@ router.post('/', async (req, res) => {
   if (!input.length || input.some((value) => !value.trim())) {
     return res.status(400).json({ error: 'A text or list of texts is required.' });
   }
-  if (!getCloudflareAccounts().length) {
-    return res.status(503).json({ error: 'Embedding generation is not configured. Add Cloudflare API credentials to the server environment.' });
+  if (!getCloudflareAccounts().length && !process.env.HF_TOKEN && !process.env.FAL_API_KEY) {
+    return res.status(503).json({ error: 'Embedding generation is not configured. Add Cloudflare API credentials, a Hugging Face token, or a fal API key to the server environment.' });
   }
 
   try {

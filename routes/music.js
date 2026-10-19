@@ -64,8 +64,8 @@ router.post('/', async (req, res) => {
   if (!prompt || !String(prompt).trim()) {
     return res.status(400).json({ error: 'A prompt is required.' });
   }
-  if (!getCloudflareAccounts().length) {
-    return res.status(503).json({ error: 'Music generation is not configured. Add Cloudflare API credentials to the server environment.' });
+  if (!getCloudflareAccounts().length && !process.env.FAL_API_KEY) {
+    return res.status(503).json({ error: 'Music generation is not configured. Add Cloudflare API credentials or a fal API key to the server environment.' });
   }
 
   const request = {

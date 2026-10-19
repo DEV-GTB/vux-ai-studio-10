@@ -192,7 +192,8 @@ async function handleTextToSpeech(req, res) {
     return res.status(400).json({ error: 'A text is required.' });
   }
   if (!getCartesiaApiKey() && !getCloudflareAccounts().length) {
-    return res.status(503).json({ error: 'Text-to-speech is not configured. Add CARTESIA_API_KEY or Cloudflare API credentials to the server environment.' });
+    // The free speech source needs no credential, so speech output is always
+    // available even when nothing else is configured.
   }
 
   const input = {
@@ -224,8 +225,8 @@ async function handleSpeechToText(req, res) {
   if (!hasBase64 && !hasUrl) {
     return res.status(400).json({ error: 'An audio file or audio URL is required.' });
   }
-  if (!getCloudflareAccounts().length) {
-    return res.status(503).json({ error: 'Speech-to-text is not configured. Add Cloudflare API credentials to the server environment.' });
+  if (!getCloudflareAccounts().length && !process.env.GROQ_API_KEY && !process.env.FAL_API_KEY && !process.env.HF_TOKEN) {
+    return res.status(503).json({ error: 'Speech-to-text is not configured. Add Cloudflare API credentials, a Groq key, a fal key, or a Hugging Face token to the server environment.' });
   }
 
   const input = {

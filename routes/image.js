@@ -104,9 +104,9 @@ router.post('/', async (req, res) => {
   const hasGemini = Boolean(process.env.GEMINI_API_KEY && process.env.GEMINI_API_KEY !== 'your_gemini_api_key_here');
   const cloudflareAccounts = getCloudflareAccounts(true);
   const hasCloudflare = cloudflareAccounts.length > 0;
-  if (!hasHuggingFace && !hasCloudflare && !hasGemini) {
-    return res.status(503).json({ error: 'Image generation is not configured. Add HF_TOKEN, GEMINI_API_KEY, or Cloudflare credentials to the server environment.' });
-  }
+  // The free image source needs no credential, so image generation is
+  // always available. The unified layer reports a failure if every provider
+  // refuses the request.
 
   try {
     const styledPrompt = `${prompt.trim()}, ${String(stylePreset).slice(0, 40)} style`;
