@@ -146,6 +146,43 @@ the UI. It now lives in `lib/promptBuilder.js`, assembled from parts.
 
 ---
 
+## The model layer
+
+`lib/aiProviders.js` is the single place that answers "which service serves
+this". Every capability - text, coding, image, image edit, video, music,
+speech in, speech out, embeddings - has one ordered list of providers, and
+every attempt returns the same shape. A route never needs to know which
+service answered.
+
+| Module | Service |
+|---|---|
+| `lib/cloudflare.js` | Workers AI |
+| `lib/gemini.js` | conversation and image |
+| `lib/groq.js` | conversation, speech in, speech out |
+| `lib/fal.js` | text, image, video, music, speech |
+| `lib/huggingface.js` | conversation, image, embeddings |
+| `lib/pollinations.js` | free image and speech, no credential |
+
+Two rules decide the order:
+
+1. **A service that answers fast goes first.** A late answer is worth
+   nothing to the person waiting.
+2. **A service that needs no credential goes last** for image and speech.
+   It is the safety net that catches the request when every other provider
+   is out of quota.
+
+A provider without a credential is skipped, not attempted. A provider that
+is refused for a billing reason says so plainly, because "User is locked.
+Reason: TOP_UP." is a different problem from a code fault.
+
+Check the state of every provider with:
+
+```bash
+node tools/probe-providers.mjs
+```
+
+---
+
 ## Layout
 
 | File | Responsibility |
