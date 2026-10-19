@@ -127,7 +127,7 @@ test('Tripo text generation creates a task, polls it, and returns the GLB', asyn
       assert.equal(options.headers.Authorization, 'Bearer test-tripo-key');
       assert.deepEqual(JSON.parse(options.body), {
         prompt: 'A detailed toy boat',
-        model: 'tripo-v3.1',
+        model: 'v3.1-20260211',
         texture: true,
         pbr: true,
       });
@@ -164,7 +164,7 @@ test('Tripo image generation uploads a file token and returns the GLB', async ()
     if (String(url).endsWith('/generation/image-to-model')) {
       assert.deepEqual(JSON.parse(options.body), {
         input: 'file_test',
-        model: 'tripo-v3.1',
+        model: 'v3.1-20260211',
         texture: true,
         pbr: true,
       });

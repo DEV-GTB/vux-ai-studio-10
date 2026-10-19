@@ -92,7 +92,8 @@ function parseImageUpload(req, res, next) {
 }
 
 const TRIPO_BASE_URL = 'https://openapi.tripo3d.ai/v3';
-const TRIPO_MODEL = process.env.TRIPO_MODEL || 'tripo-v3.1';
+// The v3 API uses the dated model id. The old id returns an unknown model.
+const TRIPO_MODEL = process.env.TRIPO_MODEL || 'v3.1-20260211';
 const delay = (milliseconds) => new Promise((resolve) => setTimeout(resolve, milliseconds));
 
 async function tripoRequest(endpoint, { method = 'POST', body, multipart = false } = {}) {

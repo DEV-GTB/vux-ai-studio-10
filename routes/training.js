@@ -1,6 +1,7 @@
 import { Router } from 'express';
 import path from 'path';
 import * as TJ from '../lib/trainingJobs.js';
+import { buildAgentPrompts } from '../lib/studioAgent.js';
 
 const router = Router();
 
@@ -67,6 +68,18 @@ router.post('/validate', async (req, res) => {
   } catch (e) { res.status(400).json({ error: 'VALIDATE_FAILED', message: e.message }); }
 });
 
+// GET /datasets/:name/preview
+// Shows the first examples in a dataset so the user can check what would be
+// trained on before starting a job.
+router.get('/datasets/:name/preview', async (req, res) => {
+  try {
+    const limit = Math.min(Number(req.query.limit) || 20, 100);
+    res.json(await TJ.readDataset(req.params.name, limit));
+  } catch (e) {
+    res.status(400).json({ error: 'PREVIEW_FAILED', message: e.message });
+  }
+});
+
 router.get('/jobs', async (_req, res) => {
   try { res.json({ jobs: await TJ.listJobs() }); }
   catch (e) { res.status(500).json({ error: 'LIST_JOBS_FAILED', message: e.message }); }
@@ -115,6 +128,74 @@ router.post('/jobs/:id/cancel', async (req, res) => {
     const job = await TJ.cancelJob(req.params.id);
     res.json({ job });
   } catch (e) { res.status(400).json({ error: 'CANCEL_FAILED', message: e.message }); }
+});
+
+// POST /collect
+//   { request, action, activeFile, files, folders, history, dataset }
+//
+// Captures an edit the user actually approved in the Studio as a training
+// example. The system and user messages are rebuilt with the same prompt
+// builder the agent uses at inference time, so the dataset matches what the
+// model will see when it is served.
+router.post('/collect', async (req, res) => {
+  try {
+    const body = req.body || {};
+    const request = typeof body.request === 'string' ? body.request.trim() : '';
+    const action = body.action;
+
+    if (!request) return res.status(400).json({ error: 'MISSING_REQUEST', message: 'request is required' });
+    if (!action || typeof action !== 'object' || typeof action.action !== 'string') {
+      return res.status(400).json({ error: 'MISSING_ACTION', message: 'action is required' });
+    }
+    // Only successful, user-approved work is worth learning from.
+    if (!['edit', 'create', 'answer'].includes(action.action)) {
+      return res.status(400).json({ error: 'UNSUPPORTED_ACTION', message: `Cannot collect action "${action.action}"` });
+    }
+
+    const files = {};
+    if (body.files && typeof body.files === 'object' && !Array.isArray(body.files)) {
+      for (const [name, content] of Object.entries(body.files).slice(0, 200)) {
+        if (typeof name === 'string' && typeof content === 'string') files[name] = content;
+      }
+    }
+
+    const history = Array.isArray(body.history)
+      ? body.history
+        .filter((turn) => turn && (turn.role === 'user' || turn.role === 'assistant') && typeof turn.content === 'string')
+        .slice(-12)
+      : [];
+
+    const prompts = buildAgentPrompts({
+      request,
+      activeFile: typeof body.activeFile === 'string' ? body.activeFile : '',
+      files,
+      folders: Array.isArray(body.folders) ? body.folders.filter((name) => typeof name === 'string') : [],
+      history,
+    });
+
+    const example = {
+      messages: [
+        { role: 'system', content: prompts.systemPrompt },
+        { role: 'user', content: prompts.userMessage },
+        { role: 'assistant', content: JSON.stringify(action) },
+      ],
+      metadata: {
+        source: 'studio-approved-edit',
+        intent: prompts.analysis.intent,
+        languages: prompts.analysis.languageIds,
+        collectedAt: new Date().toISOString(),
+      },
+    };
+
+    const dataset = typeof body.dataset === 'string' && body.dataset.trim()
+      ? body.dataset.trim()
+      : 'approved_edits.jsonl';
+
+    const result = await TJ.appendExamples(dataset, [example]);
+    res.json({ success: true, ...result, example });
+  } catch (e) {
+    res.status(400).json({ error: 'COLLECT_FAILED', message: e.message });
+  }
 });
 
 router.get('/artifacts', async (_req, res) => {

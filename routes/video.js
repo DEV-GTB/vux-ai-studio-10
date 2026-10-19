@@ -1,81 +1,132 @@
 import { Router } from 'express';
 import { GoogleGenAI } from '@google/genai';
 import { GENERIC_ERROR } from '../lib/identity.js';
+import { getCloudflareAccounts, getModelList, runCloudflareModel, splitModelList, extractImagePayload, extractAudioPayload, extractVideoPayload, extractTranscription, extractGeneratedText, extractEmbeddings, extractMediaPayload } from '../lib/cloudflare.js';
 
 const router = Router();
 
-async function downloadVideo(videoOutput, outputPath) {
-  if (!videoOutput) return null;
-
-  if (videoOutput.data) {
-    const videoBuffer = Buffer.from(videoOutput.data, 'base64');
-    return videoBuffer.toString('base64');
-  }
-  return null;
+function getCloudflareVideoModels() {
+  return getModelList('video');
 }
 
-// POST /api/video  { prompt: string }
-router.post('/', async (req, res) => {
-  const { prompt } = req.body;
-  if (!prompt) return res.status(400).json({ error: 'prompt is required' });
-  if (!process.env.GEMINI_API_KEY) {
-    console.error('[video] GEMINI_API_KEY is not set on the server');
-    return res.status(500).json({ error: GENERIC_ERROR.video });
+function getGeminiVideoModels() {
+  return splitModelList(
+    process.env.GEMINI_VIDEO_MODELS,
+    ['models/gemini-omni-flash-preview'],
+  );
+}
+
+async function generateWithCloudflareVideo(modelName, prompt, duration, account) {
+  const data = await runCloudflareModel(modelName, {
+    prompt,
+    ...(duration ? { duration } : {}),
+  }, account);
+  const { base64, contentType } = extractMediaPayload(data, { contentType: 'video/mp4' });
+  if (!base64) {
+    throw new Error('The video service returned no video.');
   }
+  return { buffer: Buffer.from(base64, 'base64'), contentType };
+}
 
-  try {
-    const ai = new GoogleGenAI({
-      apiKey: process.env.GEMINI_API_KEY,
-      vertexai: false,
-    });
+async function generateWithGeminiVideo(modelName, prompt, duration) {
+  const client = new GoogleGenAI({
+    apiKey: process.env.GEMINI_API_KEY,
+    vertexai: false,
+  });
 
-    const generationConfig = {
+  const interaction = await client.interactions.create({
+    model: modelName,
+    input: prompt,
+    generation_config: {
       max_output_tokens: 65536,
       thinking_level: 'high',
       video_config: {
         task: 'unspecified',
       },
       top_p: 0.95,
-    };
+    },
+    response_modalities: ['video'],
+    response_format: {
+      type: 'video',
+      ...(duration ? { duration } : {}),
+    },
+  });
 
-    const interaction = await ai.interactions.create({
-      model: 'models/gemini-omni-flash-preview',
-      input: prompt,
-      generation_config: generationConfig,
-      response_modalities: ['video'],
-      response_format: {
-        type: 'video',
-        duration: '10s',
-      },
-    });
-
-    let videoData = null;
-    if (interaction.steps) {
-      for (const step of interaction.steps) {
-        if (step.type === 'model_output' && step.content) {
-          for (const part of step.content) {
-            if (part.type === 'text') {
-              console.log(part.text);
-            }
-            else if (part.type === 'video') {
-              videoData = await downloadVideo(ai, part, 'output.mp4');
-              break;
-            }
+  let videoData = null;
+  if (interaction.steps) {
+    for (const step of interaction.steps) {
+      if (step.type === 'model_output' && step.content) {
+        for (const part of step.content) {
+          if (part.type === 'video') {
+            videoData = await extractVideoPart(part.video?.data);
+            break;
           }
         }
+        if (videoData) break;
       }
     }
-
-    if (!videoData) {
-      console.error('[video] No video data in response');
-      return res.status(502).json({ error: GENERIC_ERROR.video });
-    }
-
-    res.json({ video: `data:video/mp4;base64,${videoData}` });
-  } catch (err) {
-    console.error('[video] request failed:', err);
-    res.status(502).json({ error: GENERIC_ERROR.video });
   }
+
+  if (!videoData) {
+    throw new Error('No video data in response.');
+  }
+  return { buffer: videoData, contentType: 'video/mp4' };
+}
+
+async function extractVideoPart(videoBase64) {
+  if (typeof videoBase64 !== 'string' || !videoBase64) {
+    throw new Error('The video service returned no video.');
+  }
+  const videoBuffer = Buffer.from(videoBase64, 'base64');
+  if (!videoBuffer.length) {
+    throw new Error('The video service returned an empty video.');
+  }
+  return videoBuffer;
+}
+
+// POST /api/video  { prompt, duration }
+router.post('/', async (req, res) => {
+  const { prompt, duration } = req.body || {};
+  if (!prompt) {
+    return res.status(400).json({ error: 'prompt is required' });
+  }
+  if (!process.env.GEMINI_API_KEY && !getCloudflareAccounts(false).length) {
+    console.error('[video] GEMINI_API_KEY and/or Cloudflare API credentials are not set on the server');
+    return res.status(503).json({ error: GENERIC_ERROR.video });
+  }
+
+  const configuredDuration = duration || '10s';
+  const providers = [];
+
+  for (const modelName of getCloudflareVideoModels()) {
+    for (const account of getCloudflareAccounts(false)) {
+      providers.push({
+        label: `Cloudflare ${modelName}`,
+        run: () => generateWithCloudflareVideo(modelName, prompt, configuredDuration, account),
+      });
+    }
+  }
+
+  if (process.env.GEMINI_API_KEY) {
+    const models = getGeminiVideoModels();
+    for (const modelName of models) {
+      providers.push({
+        label: `Gemini ${modelName}`,
+        run: () => generateWithGeminiVideo(modelName, prompt, configuredDuration),
+      });
+    }
+  }
+
+  for (const provider of providers) {
+    try {
+      const result = await provider.run();
+      return res.json({ video: `data:${result.contentType};base64,${result.buffer.toString('base64')}` });
+    } catch (error) {
+      console.error(`[video] ${provider.label} failed:`, error?.message || error);
+    }
+  }
+
+  return res.status(502).json({ error: GENERIC_ERROR.video });
 });
 
 export default router;

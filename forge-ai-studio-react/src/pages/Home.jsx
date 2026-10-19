@@ -358,6 +358,26 @@ status: "Creating magic..."`
                   </div>
                   <div className="text-xs text-forge-textMuted">Create stunning AI images</div>
                 </div>
+                <div 
+                  onClick={() => setCurrentPage('video')}
+                  className="bg-forge-surface border border-forge-border rounded-xl p-4 hover:border-forge-primary/50 transition-all cursor-pointer group feature-card"
+                >
+                  <div className="flex items-center gap-3 mb-2">
+                    <div className="w-10 h-10 rounded-lg bg-forge-aiLight flex items-center justify-center text-xl group-hover:scale-110 transition-transform">🎬</div>
+                    <div className="font-semibold text-sm">Video Generator</div>
+                  </div>
+                  <div className="text-xs text-forge-textMuted">Render animated scenes for games and apps</div>
+                </div>
+                <div 
+                  onClick={() => setCurrentPage('music')}
+                  className="bg-forge-surface border border-forge-border rounded-xl p-4 hover:border-forge-primary/50 transition-all cursor-pointer group feature-card"
+                >
+                  <div className="flex items-center gap-3 mb-2">
+                    <div className="w-10 h-10 rounded-lg bg-forge-techLight flex items-center justify-center text-xl group-hover:scale-110 transition-transform">🎵</div>
+                    <div className="font-semibold text-sm">Music Generator</div>
+                  </div>
+                  <div className="text-xs text-forge-textMuted">Compose loops and full tracks</div>
+                </div>
                 <div className="bg-forge-surface border border-forge-border rounded-xl p-4 hover:border-forge-primary/50 transition-all cursor-pointer group feature-card">
                   <div className="flex items-center gap-3 mb-2">
                     <div className="w-10 h-10 rounded-lg bg-forge-successLight flex items-center justify-center text-xl group-hover:scale-110 transition-transform">📋</div>

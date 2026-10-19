@@ -66,6 +66,209 @@ export function Chat({ setCurrentPage: _setCurrentPage, username }) {
   const [attachedFiles, setAttachedFiles] = useState([])
   const messagesEndRef = useRef(null)
   const fileInputRef = useRef(null)
+  const audioObjectUrls = useRef(new Set())
+  useEffect(() => () => {
+    audioObjectUrls.current.forEach((url) => URL.revokeObjectURL(url))
+    audioObjectUrls.current.clear()
+  }, [])
+  const [embeddingText, setEmbeddingText] = useState('')
+  const [embeddingsPreview, setEmbeddingsPreview] = useState('')
+  const [isEmbedding, setIsEmbedding] = useState(false)
+  const [embeddingError, setEmbeddingError] = useState('')
+
+  const generateEmbeddings = async () => {
+    const texts = embeddingText
+      .split(/\n+/)
+      .map((line) => line.trim())
+      .filter(Boolean)
+    if (!texts.length || isEmbedding) return
+
+    setIsEmbedding(true)
+    setEmbeddingError('')
+    setEmbeddingsPreview('')
+
+    try {
+      const response = await fetch(apiUrl('/api/embeddings'), {
+        method: 'POST',
+        headers: {
+          'Content-Type': 'application/json',
+        },
+        body: JSON.stringify({ text: texts }),
+      })
+
+      const data = await response.json().catch(() => ({}))
+      if (!response.ok) throw new Error(data.error || 'Failed to create embeddings')
+
+      const embeddings = data.embeddings
+      if (!Array.isArray(embeddings) || embeddings.length === 0) {
+        throw new Error('The embedding service returned no embeddings.')
+      }
+
+      const preview = embeddings
+        .map((embedding, index) => {
+          const values = Array.isArray(embedding) ? embedding : [embedding]
+          return `text ${index + 1} (${values.length} values): ${values.slice(0, 12).join(', ')}...`
+        })
+        .join('\n')
+
+      setEmbeddingsPreview(preview)
+    } catch (error) {
+      console.error('Error generating embeddings:', error)
+      setEmbeddingError(error.message || 'Failed to create embeddings. Please try again.')
+    } finally {
+      setIsEmbedding(false)
+    }
+  }
+
+  // ---------- Voice: speech to text and text to speech ----------
+
+  const voiceFileInputRef = useRef(null)
+  const [isTranscribing, setIsTranscribing] = useState(false)
+  const [transcriptionError, setTranscriptionError] = useState('')
+  const [spokenReply, setSpokenReply] = useState('')
+  const [isSpeaking, setIsSpeaking] = useState(false)
+  const [voiceStatus, setVoiceStatus] = useState('')
+  const [voiceText, setVoiceText] = useState('')
+
+  const readAudioFile = (file) => {
+    if (!file) return Promise.resolve(null)
+
+    return new Promise((resolve, reject) => {
+      const reader = new FileReader()
+      reader.onload = () => resolve(reader.result)
+      reader.onerror = () => reject(reader.error)
+      reader.readAsDataURL(file)
+    })
+  }
+
+  const sendUserMessage = async (text) => {
+    const content = String(text).trim()
+    if (!content) return
+    setMessages((prev) => [...prev, { role: 'user', content }])
+    const thinking = { role: 'assistant', content: '_thinking..._' }
+    setMessages((prev) => [...prev, thinking])
+    renderChat()
+
+    try {
+      const response = await fetch(apiUrl('/api/chat'), {
+        method: 'POST',
+        headers: {
+          'Content-Type': 'application/json',
+        },
+        body: JSON.stringify({
+          messages: [...messages, { role: 'user', content }].map((message) => ({
+            role: message.role,
+            content: message.content,
+          })),
+        }),
+      })
+
+      const data = await response.json()
+      const replyText = response.ok ? (data.text || 'No response received.') : (data.error || 'Chat request failed.')
+      setMessages((prev) =>
+        prev.map((message) =>
+          message.content === '_thinking...' ? { role: 'assistant', content: replyText } : message
+        )
+      )
+    } catch (error) {
+      console.error('Chat request failed:', error)
+      setMessages((prev) =>
+        prev.map((message) =>
+          message.content === '_thinking...' ? { role: 'assistant', content: 'The assistant service could not be reached. Check your connection and try again.' } : message
+        )
+      )
+    }
+  }
+
+  const transcribeAudio = async () => {
+    const file = voiceFileInputRef.current?.files?.[0]
+    if (!file) {
+      setTranscriptionError('Choose an audio file first.')
+      return
+    }
+
+    setIsTranscribing(true)
+    setTranscriptionError('')
+    setVoiceStatus('Transcribing your audio...')
+
+    try {
+      const dataUrl = await readAudioFile(file)
+      const audioBase64 = dataUrl.slice(dataUrl.indexOf(',') + 1)
+      const response = await fetch(apiUrl('/api/stt'), {
+        method: 'POST',
+        headers: {
+          'Content-Type': 'application/json',
+        },
+        body: JSON.stringify({ audioBase64 }),
+      })
+
+      const data = await response.json().catch(() => ({}))
+      if (!response.ok) throw new Error(data.error || 'Failed to transcribe the audio')
+
+      setVoiceText(data.text)
+      setSpokenReply('')
+      setVoiceStatus(`Transcribed ${data.text.length} characters.`)
+
+      // Send the transcription straight into the chat.
+      sendUserMessage(data.text)
+    } catch (error) {
+      console.error('Error transcribing audio:', error)
+      setTranscriptionError(error.message || 'Failed to transcribe the audio. Please try again.')
+    } finally {
+      setIsTranscribing(false)
+    }
+  }
+
+  const speakText = async () => {
+    const text = voiceText.trim()
+    if (!text) {
+      setVoiceStatus('Type something to hear it spoken.')
+      return
+    }
+
+    setIsSpeaking(true)
+    setVoiceStatus('Speaking...')
+
+    try {
+      const response = await fetch(apiUrl('/api/tts'), {
+        method: 'POST',
+        headers: {
+          'Content-Type': 'application/json',
+        },
+        body: JSON.stringify({ text }),
+      })
+
+      const data = await response.json().catch(() => ({}))
+      if (!response.ok) throw new Error(data.error || 'Failed to speak the text')
+
+      const audioSource = data.audio
+      if (typeof audioSource !== 'string' || !audioSource.startsWith('data:audio/')) {
+        throw new Error('The voice service returned an unsupported audio file.')
+      }
+
+      const base64 = audioSource.slice(audioSource.indexOf(',') + 1)
+      const audioBlob = new Blob([Uint8Array.from(atob(base64), (byte) => byte.charCodeAt(0))], {
+        type: 'audio/mpeg',
+      })
+      const audioUrl = URL.createObjectURL(audioBlob)
+      audioObjectUrls.current.add(audioUrl)
+      setSpokenReply(audioUrl)
+      setVoiceStatus('Done.')
+    } catch (error) {
+      console.error('Error speaking text:', error)
+      setVoiceStatus(error.message || 'Failed to speak the text. Please try again.')
+    } finally {
+      setIsSpeaking(false)
+    }
+  }
+
+  const stopSpeaking = () => {
+    audioObjectUrls.current.forEach((url) => URL.revokeObjectURL(url))
+    audioObjectUrls.current.clear()
+    setSpokenReply('')
+    setIsSpeaking(false)
+    setVoiceStatus('')
+  }
 
   const conversations = [
     { id: 1, title: 'Build Python API', preview: 'Creating FastAPI backend...', time: '2h ago' },
@@ -312,6 +515,139 @@ export function Chat({ setCurrentPage: _setCurrentPage, username }) {
             </div>
           )}
           <div ref={messagesEndRef} />
+        </div>
+
+        {/* Text Embeddings */}
+        <div className="p-4 lg:p-6 border-t border-forge-border bg-forge-surface/50 backdrop-blur-sm">
+          <div className="max-w-4xl">
+            <h2 className="text-sm font-display font-semibold mb-1">TEXT EMBEDDINGS</h2>
+            <p className="text-xs text-forge-textMuted mb-3">
+              Turn one or more texts into embeddings. Useful for finding related content without spending an
+              AI request.
+            </p>
+            <div className="flex flex-col lg:flex-row lg:items-end gap-2">
+              <div className="flex-1">
+                <textarea
+                  value={embeddingText}
+                  onChange={(event) => setEmbeddingText(event.target.value)}
+                  placeholder="Paste the texts you want embeddings for, separated by new lines..."
+                  rows={3}
+                  className="w-full bg-forge-surfaceLow border border-forge-border rounded-xl px-4 py-2 text-sm text-forge-text focus:outline-none focus:border-forge-primary transition-all resize-none placeholder-forge-textDim"
+                  disabled={isEmbedding}
+                />
+              </div>
+              <button
+                onClick={generateEmbeddings}
+                disabled={isEmbedding || !embeddingText.trim()}
+                className={`px-4 py-2 text-sm font-semibold transition-all magnetic-button ${
+                  isEmbedding || !embeddingText.trim()
+                    ? 'bg-forge-surfaceLow text-forge-textDim cursor-not-allowed'
+                    : 'bg-forge-primary text-black hover:from-forge-primaryHover'
+                }`}
+              >
+                {isEmbedding ? 'Embedding...' : 'Get Embeddings'}
+              </button>
+            </div>
+            {embeddingError && (
+              <p className="mt-2 rounded-lg border border-red-400/30 bg-red-500/10 px-3 py-2 text-sm text-red-200" role="alert">
+                {embeddingError}
+              </p>
+            )}
+            {embeddingsPreview && (
+              <div className="mt-4 scale-in">
+                <pre className="max-h-64 overflow-auto rounded-xl border border-forge-border bg-forge-surfaceLow p-4 text-xs text-forge-textMuted whitespace-pre-wrap">
+                  {embeddingsPreview}
+                </pre>
+              </div>
+            )}
+          </div>
+        </div>
+
+        {/* Voice: speech to text and text to speech */}
+        <div className="p-4 lg:p-6 border-t border-forge-border bg-forge-surface/50 backdrop-blur-sm">
+          <div className="max-w-4xl">
+            <h2 className="text-sm font-display font-semibold mb-1">VOICE</h2>
+            <p className="text-xs text-forge-textMuted mb-3">
+              Transcribe an uploaded audio file into the chat, or hear any reply spoken aloud.
+            </p>
+
+            <div className="grid grid-cols-1 lg:grid-cols-2 gap-6">
+              <div>
+                <label className="text-sm font-medium mb-2 block">Speech to text</label>
+                <div className="flex flex-col lg:flex-row gap-2">
+                  <input
+                    type="file"
+                    accept="audio/*"
+                    className="text-sm text-forge-textMuted file:mr-3 file:rounded-lg file:border-0 file:bg-forge-surfaceLow file:px-3 file:py-2 file:text-sm file:text-forge-text file:border border-forge-border"
+                    onChange={() => {
+                      /* the currently selected file is used by the Transcribe action */
+                    }}
+                    disabled={isTranscribing}
+                  />
+                  <button
+                    onClick={transcribeAudio}
+                    disabled={isTranscribing}
+                    className="px-4 py-2 text-sm font-semibold bg-forge-primary text-black hover:from-forge-primaryHover transition-all magnetic-button disabled:cursor-not-allowed disabled:opacity-40"
+                  >
+                    {isTranscribing ? 'Transcribing...' : 'Transcribe'}
+                  </button>
+                </div>
+                {transcriptionError && (
+                  <p className="mt-2 rounded-lg border border-red-400/30 bg-red-500/10 px-3 py-2 text-sm text-red-200" role="alert">
+                    {transcriptionError}
+                  </p>
+                )}
+                {voiceStatus && (
+                  <p className="mt-2 text-xs text-forge-textMuted" role="status">
+                    {voiceStatus}
+                  </p>
+                )}
+              </div>
+
+              <div>
+                <label className="text-sm font-medium mb-2 block">Text to speech</label>
+                <textarea
+                  value={voiceText}
+                  onChange={(event) => setVoiceText(event.target.value)}
+                  placeholder="Type the text you want to hear spoken..."
+                  rows={2}
+                  className="w-full bg-forge-surfaceLow border border-forge-border rounded-xl px-4 py-2 text-sm text-forge-text focus:outline-none focus:border-forge-primary transition-all resize-none placeholder-forge-textDim"
+                />
+                <div className="flex flex-wrap gap-2 mt-2">
+                  <button
+                    onClick={speakText}
+                    disabled={isSpeaking}
+                    className="px-4 py-2 text-sm font-semibold bg-forge-ai text-black hover:from-forge-aiHover transition-all magnetic-button disabled:cursor-not-allowed disabled:opacity-40"
+                  >
+                    {isSpeaking ? 'Speaking...' : 'Speak'}
+                  </button>
+                  {spokenReply && (
+                    <button
+                      onClick={stopSpeaking}
+                      className="px-4 py-2 text-sm font-semibold bg-forge-surfaceLow border border-forge-border hover:bg-forge-surfaceHigh transition-all"
+                    >
+                      Stop
+                    </button>
+                  )}
+                </div>
+                {spokenReply && (
+                  <audio
+                    src={spokenReply}
+                    controls
+                    loop
+                    playsInline
+                    className="mt-3 w-full rounded-xl border border-forge-border bg-black"
+                    aria-label="Spoken reply playback"
+                  />
+                )}
+                {voiceStatus && !spokenReply && (
+                  <p className="mt-2 text-xs text-forge-textMuted" role="status">
+                    {voiceStatus}
+                  </p>
+                )}
+              </div>
+            </div>
+          </div>
         </div>
 
         {/* Input Area */}

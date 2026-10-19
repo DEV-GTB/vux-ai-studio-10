@@ -1,6 +1,13 @@
 import { useEffect, useMemo, useState, useRef } from 'react'
 import Editor from '@monaco-editor/react'
 import { apiUrl } from '../lib/api.js'
+import { WorkspaceProvider, useWorkspace } from '../workspace/WorkspaceContext.jsx'
+import { WorkspaceModeProvider, useWorkspaceMode } from '../workspace/WorkspaceModeContext.jsx'
+import { useWorkspaceWidth } from '../workspace/useWorkspaceWidth.js'
+import { WorkspaceToolMenu } from '../workspace/navigation/WorkspaceToolMenu.jsx'
+import { MobileToolNavigation, MoreToolsDrawer } from '../workspace/navigation/MobileToolNavigation.jsx'
+import { WorkspaceModeMenu } from '../workspace/navigation/WorkspaceModeMenu.jsx'
+import '../workspace/styles/workspace.css'
 import {
   saveTextToDevice,
   importProjectFromFolder,
@@ -173,6 +180,44 @@ const bottomPanelTabs = [
 ]
 
 export function Studio({ username }) {
+  // The workspace container is measured so the layout follows the space that
+  // is actually available, not the width of the browser window.
+  const containerRef = useRef(null)
+  const workspaceWidth = useWorkspaceWidth(containerRef)
+
+  return (
+    <div ref={containerRef} className="workspace-shell">
+      <WorkspaceModeProvider width={workspaceWidth}>
+        <WorkspaceProvider initialPanel="files">
+          <StudioWorkspace username={username} />
+        </WorkspaceProvider>
+      </WorkspaceModeProvider>
+    </div>
+  )
+}
+
+// Maps the shared workspace panel onto the panels the Studio already owns.
+// The workspace controls navigation; the Studio keeps the tool state, so a
+// layout change never restarts a session or discards an unsaved edit.
+const PANEL_TO_ACTIVITY = {
+  files: 'explorer',
+  search: 'search',
+  'source-control': 'git',
+  debug: 'debug',
+  deploy: 'deploy',
+  extensions: 'extensions',
+  assistant: 'ai',
+  settings: 'settings',
+}
+
+const PANEL_TO_BOTTOM_TAB = {
+  terminal: 'terminal',
+  output: 'output',
+  problems: 'problems',
+  tests: 'test',
+}
+
+function StudioWorkspace({ username }) {
   // Layout state
   const [sidebarVisible, setSidebarVisible] = useState(true)
   const [activeActivity, setActiveActivity] = useState('explorer')
@@ -180,13 +225,48 @@ export function Studio({ username }) {
   const [activeBottomPanel, setActiveBottomPanel] = useState('terminal')
   const [previewVisible, setPreviewVisible] = useState(false)
   const [aiPanelVisible, setAiPanelVisible] = useState(true)
-  const [isMobile, setIsMobile] = useState(false)
+  // Adaptive workspace state
+  const { effectiveMode } = useWorkspaceMode()
+  const { activePanel } = useWorkspace()
+  const [moreDrawerOpen, setMoreDrawerOpen] = useState(false)
+  // The mobile flag follows the workspace mode, so there is one source of
+  // truth for the layout instead of two competing resize listeners.
+  const isMobile = effectiveMode === 'mobile'
 
   // Project state
   const [projects, setProjects] = useState([{ name: 'Untitled project', files: starterFiles }])
   const [projectIndex, setProjectIndex] = useState(0)
   const [projectName, setProjectName] = useState('')
   const [workspaceFolders, setWorkspaceFolders] = useState([])
+
+  // The workspace picks the panel; the Studio shows it. One direction only,
+  // so the two never fight over which panel is on screen.
+  useEffect(() => {
+    const activity = PANEL_TO_ACTIVITY[activePanel]
+    if (activity) {
+      setActiveActivity(activity)
+      setSidebarVisible(true)
+    }
+
+    const bottomTab = PANEL_TO_BOTTOM_TAB[activePanel]
+    if (bottomTab) {
+      setActiveBottomPanel(bottomTab)
+      setBottomPanelVisible(true)
+    }
+
+    if (activePanel === 'editor') {
+      setSidebarVisible(false)
+    }
+  }, [activePanel])
+
+  // The mobile layout shows one tool at a time, so a side panel has to give
+  // way to the editor.
+  useEffect(() => {
+    if (effectiveMode !== 'mobile') return
+    if (activePanel === 'files' || activePanel === 'assistant' || activePanel === 'settings') {
+      setSidebarVisible(false)
+    }
+  }, [effectiveMode, activePanel])
   const [workspaceStatus, setWorkspaceStatus] = useState('Loading local workspace')
   const saveEditorRef = useRef(null)
 
@@ -620,15 +700,6 @@ export function Studio({ username }) {
   const sortedWorkspaceFolders = [...workspaceFolders].sort((left, right) => left.localeCompare(right))
   const canPreview = activeTab.endsWith('.html')
 
-  // Responsive design
-  useEffect(() => {
-    const handleResize = () => {
-      setIsMobile(window.innerWidth < 768)
-    }
-    handleResize()
-    window.addEventListener('resize', handleResize)
-    return () => window.removeEventListener('resize', handleResize)
-  }, [])
 
   // Update draft when active tab changes
   useEffect(() => {
@@ -1633,35 +1704,19 @@ export function Studio({ username }) {
             {projects.map((item, index) => <option key={`${item.name}-${index}`} value={index}>{item.name}</option>)}
           </select>
           <button onClick={createProject} className="rounded bg-forge-primary px-2 py-1 text-xs font-semibold text-black">+ Project</button>
+          <WorkspaceModeMenu compact={effectiveMode === 'mobile'} />
         </div>
       </header>
 
       {/* Main IDE Layout */}
       <div className="flex-1 flex overflow-hidden">
-        {/* Activity Bar */}
-        <div className="flex flex-col items-center py-2 bg-forge-surface border-r border-forge-border w-12 flex-shrink-0">
-          {activityBarItems.map(item => (
-            <button
-              key={item.id}
-              onClick={() => {
-                setActiveActivity(item.id)
-                if (isMobile) setSidebarVisible(true)
-              }}
-              className={`p-2 rounded-lg mb-1 text-lg ${activeActivity === item.id ? 'bg-forge-primaryLight text-forge-primary' : 'hover:bg-forge-surfaceLow'}`}
-              title={item.label}
-            >
-              {item.icon}
-            </button>
-          ))}
-          <div className="flex-1" />
-          <button
-            onClick={() => setBottomPanelVisible(!bottomPanelVisible)}
-            className={`p-2 rounded-lg text-lg ${bottomPanelVisible ? 'bg-forge-techLight text-forge-tech' : 'hover:bg-forge-surfaceLow'}`}
-            title="Toggle Bottom Panel"
-          >
-            {bottomPanelVisible ? '▽' : '△'}
-          </button>
-        </div>
+        {/* Workspace tool menu — every tool has its own entry. */}
+        <WorkspaceToolMenu
+          mode={effectiveMode}
+          onSelect={() => {
+            if (effectiveMode === 'mobile') setMoreDrawerOpen(false)
+          }}
+        />
 
         {/* Sidebar */}
         {sidebarVisible && (
@@ -2348,7 +2403,7 @@ export function Studio({ username }) {
         </div>
 
         {/* AI Panel */}
-        {aiPanelVisible && !isMobile && (
+        {aiPanelVisible && effectiveMode !== 'mobile' && (
           <aside className="w-80 border-l border-forge-border bg-forge-surface flex flex-col flex-shrink-0">
             <div className="flex items-center justify-between px-3 py-2 border-b border-forge-border">
               <h2 className="text-xs font-semibold tracking-widest">AI ASSISTANT</h2>
@@ -2432,6 +2487,13 @@ export function Studio({ username }) {
                     </button>
                   </form>
                 )}
+
+      {/* Mobile tool navigation: one tool at a time, with the rest in the drawer. */}
+      {effectiveMode === 'mobile' && (
+        <MobileToolNavigation onOpenMore={() => setMoreDrawerOpen(true)} />
+      )}
+
+      <MoreToolsDrawer open={moreDrawerOpen} onClose={() => setMoreDrawerOpen(false)} />
               </div>
             ) : (
               <div className="flex-1 overflow-auto p-3">

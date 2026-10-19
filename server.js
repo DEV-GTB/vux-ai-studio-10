@@ -7,10 +7,14 @@ import path from 'path';
 import { fileURLToPath } from 'url';
 
 import chatRouter from './routes/chat.js';
+import codeRouter from './routes/code.js';
 import visionRouter from './routes/vision.js';
 import liveVisionRouter from './routes/liveVision.js';
 import imageRouter from './routes/image.js';
 import object3dRouter from './routes/3d.js';
+import voiceRouter, { ttsRouter, sttRouter } from './routes/voice.js';
+import musicRouter from './routes/music.js';
+import embeddingsRouter from './routes/embeddings.js';
 import terminalRouter from './routes/terminal.js';
 import projectRouter from './routes/project.js';
 import workspaceRouter from './routes/workspace.js';
@@ -106,10 +110,16 @@ if (process.env.VERCEL === '1' || process.env.NODE_ENV === 'production') {
 }
 
 app.use('/api/chat', chatRouter);
+app.use('/api/code', codeRouter);
 app.use('/api/vision', visionRouter);
 app.use('/api/vision/app', liveVisionRouter);
 app.use('/api/image', imageRouter);
 app.use('/api/3d', object3dRouter);
+app.use('/api/voice', voiceRouter);
+app.use('/api/tts', ttsRouter);
+app.use('/api/stt', sttRouter);
+app.use('/api/music', musicRouter);
+app.use('/api/embeddings', embeddingsRouter);
 app.use('/api/training', trainingRouter);
 app.use('/api/knowledge', knowledgeRouter);app.use('/api/terminal', terminalRouter);
 app.use('/api/project', projectRouter);

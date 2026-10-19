@@ -10,7 +10,9 @@
     "build": "npm install --prefix forge-ai-studio-react && npm --prefix forge-ai-studio-react run build",
     "start": "node server.js",
     "dev": "node --watch server.js",
-    "test": "node --test ./tests/**/*.test.js"
+    "test": "node --test \"tests/*.test.js\"",
+    "eval": "node training/eval/run_evals.mjs",
+    "dataset:build": "node training/eval/build_dataset.mjs"
   },
   "dependencies": {
     "@google/genai": "^2.19.0",

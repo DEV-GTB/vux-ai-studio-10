@@ -1,4 +1,5 @@
 import { Router } from 'express';
+import { getCloudflareAccounts, getModelList, runCloudflareModel, extractMediaPayload } from '../lib/cloudflare.js';
 import Cloudflare from 'cloudflare';
 import { InferenceClient } from '@huggingface/inference';
 import { GENERIC_ERROR } from '../lib/identity.js';
@@ -17,6 +18,37 @@ function getDimensions(aspectRatio) {
     '21:9': { width: 1536, height: 640 },
   };
   return dimensions[aspectRatio] || dimensions['1:1'];
+}
+
+// Builds the request body a model expects. Each image model family has its
+// own shape, so the body is built per model.
+function buildCloudflareImageRequest(modelName, input) {
+  if (input.reference) {
+    if (modelName === 'krea/krea-3') {
+      return {
+        prompt: input.instruction || input.prompt,
+        image_urls: [input.reference],
+        resolution: input.resolution,
+      };
+    } else if (modelName === 'bria/fibo-edit-1.5') {
+      return {
+        instruction: input.instruction,
+        images: [input.reference],
+      };
+    } else if (modelName === 'pruna/p-image-upscale') {
+      return {
+        image: input.reference,
+        target: input.target,
+        enhance_details: input.enhanceDetails,
+      };
+    }
+    return { prompt: input.instruction || input.prompt };
+  }
+
+  return {
+    prompt: input.prompt,
+    steps: input.steps,
+  };
 }
 
 function getInferenceSteps(quality) {
@@ -60,7 +92,7 @@ async function generateGeminiImage(prompt) {
 }
 
 router.post('/', async (req, res) => {
-  const { prompt, stylePreset = 'photorealistic', aspectRatio = '1:1', quality = 'high' } = req.body || {};
+  const { prompt, stylePreset = 'photorealistic', aspectRatio = '1:1', quality = 'high', referenceImage, instruction, target, enhanceDetails } = req.body || {};
   if (typeof prompt !== 'string' || !prompt.trim()) {
     return res.status(400).json({ error: 'A prompt is required.' });
   }
@@ -69,11 +101,8 @@ router.post('/', async (req, res) => {
   }
   const hasHuggingFace = Boolean(process.env.HF_TOKEN && process.env.HF_TOKEN !== 'your_huggingface_api_key_here');
   const hasGemini = Boolean(process.env.GEMINI_API_KEY && process.env.GEMINI_API_KEY !== 'your_gemini_api_key_here');
-  const hasCloudflare = Boolean(
-    process.env.CLOUDFLARE_API_TOKEN
-    && process.env.CLOUDFLARE_API_TOKEN !== 'your_cloudflare_api_token_here'
-    && process.env.CLOUDFLARE_ACCOUNT_ID
-  );
+  const cloudflareAccounts = getCloudflareAccounts(true);
+  const hasCloudflare = cloudflareAccounts.length > 0;
   if (!hasHuggingFace && !hasCloudflare && !hasGemini) {
     return res.status(503).json({ error: 'Image generation is not configured. Add HF_TOKEN, GEMINI_API_KEY, or Cloudflare credentials to the server environment.' });
   }
@@ -81,35 +110,32 @@ router.post('/', async (req, res) => {
   try {
     const styledPrompt = `${prompt.trim()}, ${String(stylePreset).slice(0, 40)} style`;
     if (hasCloudflare) {
-      try {
-        const cloudflareModel = process.env.CLOUDFLARE_IMAGE_MODEL || '@cf/black-forest-labs/flux-1-schnell';
-        const cloudflareResponse = await fetch(
-          `https://api.cloudflare.com/client/v4/accounts/${process.env.CLOUDFLARE_ACCOUNT_ID}/ai/run/${cloudflareModel}`,
-          {
-            method: 'POST',
-            headers: {
-              Authorization: `Bearer ${process.env.CLOUDFLARE_API_TOKEN}`,
-              'Content-Type': 'application/json',
-            },
-            body: JSON.stringify({
+      // An edit request uses the models that can take a reference image; a
+      // text request uses the models that generate one. Every model is tried
+      // in order, because a model can be unavailable on a given account.
+      const modelList = referenceImage ? getModelList('imageEdit') : getModelList('image');
+      for (const cloudflareModel of modelList) {
+        try {
+          const cloudflarePayload = await runCloudflareModel(
+            cloudflareModel,
+            buildCloudflareImageRequest(cloudflareModel, {
               prompt: styledPrompt.slice(0, 2048),
+              instruction,
+              reference: referenceImage,
+              target,
+              enhanceDetails: enhanceDetails === true,
+              resolution: getDimensions(aspectRatio).height >= getDimensions(aspectRatio).width ? '2K' : '1K',
               steps: Math.min(getInferenceSteps(quality), 8),
             }),
-          }
-        );
-        const cloudflareText = await cloudflareResponse.text();
-        let cloudflareData = {};
-        try { cloudflareData = cloudflareText ? JSON.parse(cloudflareText) : {}; } catch { cloudflareData = {}; }
-        if (!cloudflareResponse.ok || !cloudflareData?.success || !cloudflareData?.result?.image) {
-          throw new Error(cloudflareData?.errors?.[0]?.message || `Cloudflare returned HTTP ${cloudflareResponse.status}.`);
-        }
-        res.setHeader('Content-Type', 'image/jpeg');
-        res.setHeader('Cache-Control', 'no-store');
-        return res.send(Buffer.from(cloudflareData.result.image, 'base64'));
-      } catch (error) {
-        console.error('[image] Cloudflare Workers AI generation failed:', error?.message || 'provider-error');
-        if (!hasHuggingFace && !hasGemini) {
-          // continue to the next configured provider instead of failing immediately
+            cloudflareAccounts[0],
+          );
+          const { base64, contentType } = extractMediaPayload(cloudflarePayload, { contentType: 'image/jpeg' });
+          if (!base64) throw new Error('The image service returned no image.');
+          res.setHeader('Content-Type', contentType);
+          res.setHeader('Cache-Control', 'no-store');
+          return res.send(Buffer.from(base64, 'base64'));
+        } catch (error) {
+          console.error(`[image] ${cloudflareModel} failed:`, error?.message || 'provider-error');
         }
       }
     }

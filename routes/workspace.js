@@ -163,7 +163,12 @@ router.post('/file', async (req, res) => {
     const root = await getRoot();
     const { target, segments } = resolveRelativePath(root, relativePath);
     await assertNoSymlinks(root, segments);
-    if (mode === 'create') await writeFile(target, content, { encoding: 'utf8', flag: 'wx' });
+    if (mode === 'create') {
+      // The parent folder may not exist yet. Creating it here means a file
+      // can be created straight into a new folder instead of failing.
+      await mkdir(path.dirname(target), { recursive: true });
+      await writeFile(target, content, { encoding: 'utf8', flag: 'wx' });
+    }
     else {
       if (!(await lstat(target)).isFile()) return res.status(400).json({ error: 'NOT_A_FILE' });
       await writeFile(target, content, 'utf8');
