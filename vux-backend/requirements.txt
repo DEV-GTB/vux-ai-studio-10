@@ -1,0 +1,9 @@
+fastapi
+uvicorn[standard]
+python-multipart
+pydantic
+pydantic-settings
+google-genai
+supabase
+python-jose[cryptography]
+httpx

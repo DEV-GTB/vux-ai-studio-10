@@ -1,0 +1,137 @@
+/* CSS Variables */
+:root {
+  --background: #0c1324;
+  --on-background: #dce1fb;
+  --surface: #0c1324;
+  --surface-container-lowest: #070d1f;
+  --surface-container-low: #151b2d;
+  --surface-container: #191f31;
+  --surface-container-high: #23293c;
+  --surface-container-highest: #2e3447;
+  --surface-bright: #33394c;
+  --surface-dim: #0c1324;
+  --surface-variant: #2e3447;
+  --on-surface: #dce1fb;
+  --on-surface-variant: #b9cacb;
+  --primary: #e1fdff;
+  --primary-container: #00f2ff;
+  --primary-fixed-dim: #00dbe7;
+  --primary-fixed: #74f5ff;
+  --on-primary: #00363a;
+  --on-primary-container: #006a71;
+  --secondary: #c0c1ff;
+  --secondary-container: #3131c0;
+  --tertiary: #fff6e4;
+  --tertiary-container: #fed83a;
+  --error: #ffb4ab;
+  --error-container: #93000a;
+  --outline: #849495;
+  --outline-variant: #3a494b;
+}
+
+* { box-sizing: border-box; }
+
+body {
+  margin: 0;
+  background: var(--background);
+  color: var(--on-background);
+  font-family: 'Inter', sans-serif;
+}
+
+/* Typography */
+.font-headline-md {
+  font-family: 'Sora', sans-serif;
+  font-size: 24px;
+  line-height: 1.4;
+  font-weight: 600;
+}
+
+.font-display-lg-mobile {
+  font-family: 'Sora', sans-serif;
+  font-size: 40px;
+  line-height: 1.2;
+  letter-spacing: -0.02em;
+  font-weight: 700;
+}
+
+.font-body-lg {
+  font-family: 'Inter', sans-serif;
+  font-size: 18px;
+  line-height: 1.6;
+  font-weight: 400;
+}
+
+.font-body-md {
+  font-family: 'Inter', sans-serif;
+  font-size: 16px;
+  line-height: 1.6;
+  font-weight: 400;
+}
+
+.font-label-sm {
+  font-family: 'JetBrains Mono', monospace;
+  font-size: 12px;
+  line-height: 1.0;
+  letter-spacing: 0.1em;
+  font-weight: 500;
+}
+
+/* Colors */
+.text-primary { color: var(--primary); }
+.text-on-background { color: var(--on-background); }
+.text-on-surface { color: var(--on-surface); }
+.text-on-surface-variant { color: var(--on-surface-variant); }
+.bg-background { background: var(--background); }
+.bg-surface { background: var(--surface); }
+.bg-primary { background: var(--primary); }
+.bg-primary-container { background: var(--primary-container); }
+
+/* Effects */
+.glass-panel {
+  background: rgba(12, 19, 36, 0.4);
+  backdrop-filter: blur(12px);
+  -webkit-backdrop-filter: blur(12px);
+  box-shadow: inset 1px 1px 0px rgba(255, 255, 255, 0.1);
+}
+
+.glow-effect {
+  box-shadow: 0 0 15px rgba(0, 242, 255, 0.15);
+  transition: box-shadow 0.3s ease;
+}
+
+.glow-effect:focus-within {
+  box-shadow: 0 0 25px rgba(0, 242, 255, 0.3);
+}
+
+.pulse-text {
+  animation: pulse-glow 3s infinite alternate;
+}
+
+@keyframes pulse-glow {
+  0% { text-shadow: 0 0 10px rgba(225, 253, 255, 0.2); }
+  100% { text-shadow: 0 0 20px rgba(225, 253, 255, 0.5), 0 0 40px rgba(0, 242, 255, 0.3); }
+}
+
+/* Custom scrollbar */
+::-webkit-scrollbar {
+  width: 4px;
+}
+::-webkit-scrollbar-track {
+  background: rgba(12, 19, 36, 0.1);
+}
+::-webkit-scrollbar-thumb {
+  background: rgba(0, 242, 255, 0.3);
+  border-radius: 4px;
+}
+::-webkit-scrollbar-thumb:hover {
+  background: rgba(0, 242, 255, 0.6);
+}
+
+/* Material Icons */
+.material-symbols-outlined {
+  font-variation-settings: 'FILL' 0, 'wght' 400, 'GRAD' 0, 'opsz' 24;
+}
+
+.font-variation-settings\: 'FILL'\ 1 {
+  font-variation-settings: 'FILL' 1, 'wght' 400, 'GRAD' 0, 'opsz' 24;
+}

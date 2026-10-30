@@ -1,0 +1,274 @@
+<!DOCTYPE html><html class="dark" lang="en" style=""><head>
+<meta charset="utf-8">
+<meta content="width=device-width, initial-scale=1.0" name="viewport">
+<title>VUX AI - limitless code</title>
+<script src="https://cdn.tailwindcss.com?plugins=forms,container-queries"></script>
+<link href="https://fonts.googleapis.com/css2?family=Inter:wght@400;600;700&amp;family=JetBrains+Mono:wght@500&amp;display=swap" rel="stylesheet">
+<link href="https://fonts.googleapis.com/css2?family=Material+Symbols+Outlined:wght,FILL@100..700,0..1&amp;display=swap" rel="stylesheet">
+<link href="https://fonts.googleapis.com/css2?family=Material+Symbols+Outlined:wght,FILL@100..700,0..1&amp;display=swap" rel="stylesheet">
+<script id="tailwind-config">
+        tailwind.config = {
+            darkMode: "class",
+            theme: {
+                extend: {
+                    colors: {
+                        "primary-container": "#06b6d4",
+                        "on-tertiary-fixed-variant": "#6a3b00",
+                        "on-surface-variant": "#bcc9cd",
+                        "surface-bright": "#31394d",
+                        "surface-dim": "#0b1326",
+                        "on-primary-fixed": "#001f26",
+                        "on-primary-fixed-variant": "#004e5c",
+                        "secondary-fixed": "#d8e3fb",
+                        "tertiary": "#ffb873",
+                        "tertiary-fixed-dim": "#ffb873",
+                        "secondary-fixed-dim": "#bcc7de",
+                        "on-secondary-container": "#aeb9d0",
+                        "surface-variant": "#2d3449",
+                        "background": "#0b1326",
+                        "on-secondary-fixed-variant": "#3c475a",
+                        "surface-container": "#171f33",
+                        "secondary": "#bcc7de",
+                        "inverse-surface": "#dae2fd",
+                        "on-secondary": "#263143",
+                        "outline": "#869397",
+                        "tertiary-fixed": "#ffdcbf",
+                        "inverse-on-surface": "#283044",
+                        "surface": "#0b1326",
+                        "primary-fixed-dim": "#4cd7f6",
+                        "on-tertiary": "#4b2800",
+                        "on-secondary-fixed": "#111c2d",
+                        "primary-fixed": "#acedff",
+                        "on-primary": "#003640",
+                        "on-surface": "#dae2fd",
+                        "on-tertiary-container": "#5b3200",
+                        "on-error-container": "#ffdad6",
+                        "on-background": "#dae2fd",
+                        "surface-container-high": "#222a3d",
+                        "on-error": "#690005",
+                        "outline-variant": "#3d494c",
+                        "surface-container-low": "#131b2e",
+                        "surface-container-highest": "#2d3449",
+                        "on-tertiary-fixed": "#2d1600",
+                        "inverse-primary": "#00687a",
+                        "secondary-container": "#3e495d",
+                        "on-primary-container": "#00424f",
+                        "error": "#ffb4ab",
+                        "surface-container-lowest": "#060e20",
+                        "surface-tint": "#4cd7f6",
+                        "tertiary-container": "#e89337",
+                        "primary": "#4cd7f6",
+                        "error-container": "#93000a"
+                    },
+                    borderRadius: {
+                        DEFAULT: "0.125rem",
+                        lg: "0.25rem",
+                        xl: "0.5rem",
+                        full: "0.75rem"
+                    },
+                    spacing: {
+                        unit: "4px",
+                        sm: "8px",
+                        2xl: "64px",
+                        "margin-desktop": "32px",
+                        xl: "40px",
+                        "margin-mobile": "16px",
+                        gutter: "16px",
+                        xs: "4px",
+                        md: "16px",
+                        lg: "24px"
+                    },
+                    fontFamily: {
+                        "headline-xl": ["Inter"],
+                        "body-md": ["Inter"],
+                        "body-lg": ["Inter"],
+                        "label-caps": ["JetBrains Mono"],
+                        "body-sm": ["Inter"],
+                        "headline-md": ["Inter"],
+                        "headline-lg": ["Inter"]
+                    },
+                    fontSize: {
+                        "headline-xl": ["48px", { lineHeight: "1.1", letterSpacing: "-0.04em", fontWeight: "700" }],
+                        "body-md": ["16px", { lineHeight: "24px", letterSpacing: "0", fontWeight: "400" }],
+                        "body-lg": ["18px", { lineHeight: "28px", letterSpacing: "-0.01em", fontWeight: "400" }],
+                        "label-caps": ["12px", { lineHeight: "16px", letterSpacing: "0.05em", fontWeight: "500" }],
+                        "body-sm": ["14px", { lineHeight: "20px", letterSpacing: "0", fontWeight: "400" }],
+                        "headline-md": ["24px", { lineHeight: "1.3", letterSpacing: "-0.02em", fontWeight: "600" }],
+                        "headline-lg": ["32px", { lineHeight: "1.2", letterSpacing: "-0.03em", fontWeight: "600" }]
+                    }
+                }
+            }
+        }
+    </script>
+<style>
+        body {
+            background: radial-gradient(circle at 50% 18%, rgba(29, 72, 124, 0.62), rgba(2, 9, 20, 1) 38%, rgba(1, 6, 15, 1) 100%);
+        }
+
+        .particle-layer {
+            position: absolute;
+            inset: 0;
+            overflow: hidden;
+            pointer-events: none;
+            z-index: 0;
+        }
+
+        .particle {
+            position: absolute;
+            width: 4px;
+            height: 4px;
+            border-radius: 9999px;
+            background: rgba(127, 217, 255, 0.7);
+            box-shadow: 0 0 18px rgba(127, 217, 255, 0.7);
+            animation: floatParticle linear infinite;
+        }
+
+        @keyframes floatParticle {
+            0% {
+                transform: translate3d(0, 0, 0) scale(0.7);
+                opacity: 0;
+            }
+            15% {
+                opacity: 0.8;
+            }
+            50% {
+                transform: translate3d(18px, -120px, 0) scale(1);
+                opacity: 1;
+            }
+            100% {
+                transform: translate3d(-18px, -220px, 0) scale(0.4);
+                opacity: 0;
+            }
+        }
+
+        .hero-title-container {
+            position: relative;
+            display: block;
+            width: 100%;
+            text-align: center;
+        }
+
+        .hero-content {
+            display: flex;
+            flex-direction: column;
+            align-items: center;
+            justify-content: center;
+            text-align: center;
+            width: min(100%, 860px);
+            margin: 0 auto;
+        }
+
+        .hero-glow {
+            text-shadow: 0 0 18px rgba(94, 200, 255, 0.45);
+        }
+
+        .footer-links {
+            display: flex;
+            align-items: center;
+            justify-content: center;
+            flex-wrap: wrap;
+            gap: 1.4rem;
+            line-height: 1.5;
+        }
+
+        .btn-primary {
+            @apply inline-flex items-center justify-center bg-primary text-on-primary px-lg py-sm rounded-DEFAULT font-label-caps uppercase hover:shadow-[0_10px_20px_-10px_rgba(76,215,246,0.25)] transition-all;
+        }
+
+        .btn-outline {
+            @apply inline-flex items-center justify-center border border-surface-variant text-on-surface px-lg py-sm rounded-DEFAULT font-label-caps uppercase hover:border-primary hover:text-primary transition-all;
+        }
+    </style>
+</head>
+<body class="bg-background text-on-background min-h-screen flex flex-col font-body-md overflow-x-hidden selection:bg-primary/30">
+<div class="particle-layer" aria-hidden="true">
+    <span class="particle" style="left: 8%; top: 78%; animation-duration: 11s; animation-delay: 0s;"></span>
+    <span class="particle" style="left: 14%; top: 62%; animation-duration: 14s; animation-delay: 1.5s;"></span>
+    <span class="particle" style="left: 23%; top: 70%; animation-duration: 12s; animation-delay: 3s;"></span>
+    <span class="particle" style="left: 32%; top: 58%; animation-duration: 16s; animation-delay: 2s;"></span>
+    <span class="particle" style="left: 42%; top: 76%; animation-duration: 13s; animation-delay: 4s;"></span>
+    <span class="particle" style="left: 54%; top: 64%; animation-duration: 15s; animation-delay: 0.5s;"></span>
+    <span class="particle" style="left: 63%; top: 72%; animation-duration: 17s; animation-delay: 2.8s;"></span>
+    <span class="particle" style="left: 72%; top: 66%; animation-duration: 13s; animation-delay: 1s;"></span>
+    <span class="particle" style="left: 82%; top: 80%; animation-duration: 18s; animation-delay: 3.3s;"></span>
+    <span class="particle" style="left: 90%; top: 62%; animation-duration: 12s; animation-delay: 1.8s;"></span>
+    <span class="particle" style="left: 70%; top: 52%; animation-duration: 15s; animation-delay: 5s;"></span>
+    <span class="particle" style="left: 48%; top: 82%; animation-duration: 16s; animation-delay: 4.5s;"></span>
+</div>
+<header class="fixed top-0 w-full z-50 bg-[#020d1d]/80 backdrop-blur-md border-b border-white/10 transition-all duration-200 ease-in-out">
+<div class="flex justify-between items-center px-margin-desktop h-16 max-w-[1280px] mx-auto w-full">
+<div class="flex items-center gap-3 h-10 w-auto">
+  <svg class="h-10 w-10 md:h-12 md:w-12" viewBox="0 0 180 150" aria-label="VUX AI logo" role="img">
+    <defs>
+      <linearGradient id="vuxGlowLeft" x1="0%" x2="100%" y1="0%" y2="100%">
+        <stop offset="0%" stop-color="#5ce0ff"/>
+        <stop offset="48%" stop-color="#4aa7ff"/>
+        <stop offset="100%" stop-color="#7a6bff"/>
+      </linearGradient>
+      <linearGradient id="vuxGlowRight" x1="100%" x2="0%" y1="0%" y2="100%">
+        <stop offset="0%" stop-color="#ff75d8"/>
+        <stop offset="50%" stop-color="#c96eff"/>
+        <stop offset="100%" stop-color="#7ecbff"/>
+      </linearGradient>
+      <filter id="vuxSoftGlow" x="-30%" y="-30%" width="160%" height="160%">
+        <feGaussianBlur stdDeviation="8" result="blur"/>
+        <feMerge>
+          <feMergeNode in="blur"/>
+          <feMergeNode in="SourceGraphic"/>
+        </feMerge>
+      </filter>
+    </defs>
+    <path d="M20 118 L62 34 C75 8 100 8 113 34 L161 118" fill="none" stroke="url(#vuxGlowLeft)" stroke-width="18" stroke-linecap="round" stroke-linejoin="round" filter="url(#vuxSoftGlow)" opacity="0.92"/>
+    <path d="M84 88 L122 10 C130 0 144 0 152 10 L162 26 C170 37 162 50 149 48 L125 45 L96 94" fill="none" stroke="url(#vuxGlowRight)" stroke-width="16" stroke-linecap="round" stroke-linejoin="round" filter="url(#vuxSoftGlow)" opacity="0.9"/>
+    <path d="M48 62 L83 62" stroke="rgba(255,255,255,0.8)" stroke-width="4" stroke-linecap="round" opacity="0.7"/>
+    <path d="M86 58 L127 58" stroke="rgba(255,255,255,0.7)" stroke-width="3" stroke-linecap="round" opacity="0.6"/>
+    <path d="M122 14 L126 8 L130 14 L136 18 L130 22 L126 28 L122 22 L116 18 L122 14Z" fill="#ffe7ff" filter="url(#vuxSoftGlow)"/>
+  </svg>
+</div>
+<nav class="hidden md:flex gap-10 items-center">
+<a class="text-gray-300 hover:text-white transition-colors duration-200 text-[15px]" href="#">Platform</a>
+<a class="text-gray-300 hover:text-white transition-colors duration-200 text-[15px]" href="#">Solutions</a>
+<a class="text-gray-300 hover:text-white transition-colors duration-200 text-[15px]" href="#">Resources</a>
+<a class="text-gray-300 hover:text-white transition-colors duration-200 text-[15px]" href="#">Pricing</a>
+</nav>
+<div class="hidden md:flex items-center gap-md">
+<a class="inline-flex items-center justify-center rounded-xl border border-white/10 bg-[#0b1b2d] px-5 py-2.5 text-[15px] text-white hover:border-blue-300/50 hover:text-blue-200 transition-all" href="/username.html">Sign up</a>
+</div>
+</div>
+</header>
+<main class="relative z-10 flex-grow flex flex-col justify-center items-center px-margin-mobile md:px-margin-desktop py-2xl lg:py-[120px] pt-[120px] max-w-[1280px] mx-auto w-full">
+<div class="absolute inset-0 overflow-hidden pointer-events-none -z-10">
+<div class="absolute top-1/4 left-1/4 w-96 h-96 bg-primary/5 rounded-full blur-3xl"></div>
+<div class="absolute bottom-1/4 right-1/4 w-[500px] h-[500px] bg-surface-container/50 rounded-full blur-3xl"></div>
+</div>
+<div class="hero-content">
+<a class="inline-flex items-center gap-xs px-sm py-xs rounded-full border border-surface-variant bg-surface-container-low text-on-surface-variant font-label-caps mb-lg hover:border-primary/50 hover:text-primary transition-colors" href="#">
+Read our launch article
+<span class="material-symbols-outlined text-[14px]">arrow_right_alt</span>
+</a>
+<h1 class="font-headline-xl text-headline-xl mb-lg flex flex-col items-center w-full leading-[0.94] tracking-[-0.05em]">
+<span class="block text-white hero-glow">Build the future</span>
+<span class="hero-title-container block text-[#5ec8ff] hero-glow font-bold mt-2">beautiful</span>
+</h1>
+<p class="font-body-lg text-body-lg text-[#c5d2e7] mb-xl max-w-[770px] leading-relaxed">Your intelligent workspace for turning ideas into code, solving complex problems, and building faster with AI. Think less about the code. Create more of what matters.</p>
+<div class="flex flex-col sm:flex-row gap-md justify-center">
+<a class="text-[18px] text-white font-medium inline-flex items-center gap-2 hover:text-[#71d7ff] transition-colors" href="/username.html">
+Sign up here
+<span class="material-symbols-outlined text-[18px]">arrow_right_alt</span>
+</a>
+</div>
+</div>
+</main>
+<footer class="w-full py-lg bg-[#020d1d] border-t border-white/10">
+<div class="flex flex-col md:flex-row justify-between items-center px-margin-desktop max-w-[1280px] mx-auto gap-md font-body-sm text-body-sm text-[#dfe8f6]">
+<div class="font-bold text-white">VUX AI</div>
+<div class="text-gray-400 text-center">© 2024 VUX AI Inc. All rights reserved.</div>
+<div class="footer-links">
+<a class="text-gray-400 hover:text-white transition-colors" href="#">Privacy Policy</a>
+<a class="text-gray-400 hover:text-white transition-colors" href="#">Terms of Service</a>
+<a class="text-gray-400 hover:text-white transition-colors" href="#">Security</a>
+<a class="text-gray-400 hover:text-white transition-colors" href="#">Status</a>
+</div>
+</div>
+</footer>
+</body></html>

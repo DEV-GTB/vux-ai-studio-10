@@ -1,0 +1,92 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="UTF-8" />
+<meta name="viewport" content="width=device-width, initial-scale=1.0" />
+<title>VUX AI</title>
+<link rel="preconnect" href="https://fonts.googleapis.com">
+<link href="https://fonts.googleapis.com/css2?family=Space+Grotesk:wght@500;600;700&family=IBM+Plex+Sans:wght@400;500;600&family=IBM+Plex+Mono:wght@400;500&display=swap" rel="stylesheet">
+<link href="https://fonts.googleapis.com/css2?family=Material+Symbols+Outlined:wght,FILL@100..700,0..1&display=swap" rel="stylesheet"/>
+<link rel="stylesheet" href="/style.css" />
+<script src="https://cdnjs.cloudflare.com/ajax/libs/marked/12.0.0/marked.min.js"></script>
+<script src="https://cdnjs.cloudflare.com/ajax/libs/highlight.js/11.9.0/highlight.min.js"></script>
+<link rel="stylesheet" href="https://cdnjs.cloudflare.com/ajax/libs/highlight.js/11.9.0/styles/atom-one-dark.min.css">
+</head>
+<body>
+  <div id="access-gate" class="access-gate hidden">
+    <form id="access-form" class="access-card">
+      <div class="access-brand">VUX AI</div>
+      <p class="access-copy">Enter your access code to continue.</p>
+      <input id="access-input" type="password" placeholder="Access code" autocomplete="off" />
+      <button type="submit">Enter</button>
+      <p id="access-error" class="access-error hidden">Incorrect code — try again.</p>
+    </form>
+  </div>
+
+  <div class="app">
+    <nav class="rail">
+      <div class="brand-wrap">
+        <div class="brand-mark">
+          <span class="material-symbols-outlined">auto_awesome</span>
+        </div>
+        <div class="brand-text">VUX AI</div>
+      </div>
+
+      <div class="rail-nav">
+        <button type="button" class="rail-tab active" aria-label="Chat">
+          <span class="material-symbols-outlined">chat</span>
+          <span>Chat</span>
+        </button>
+      </div>
+
+      <div class="user-info" id="user-info">
+        <span class="material-symbols-outlined">person</span>
+        <span id="username-display">Guest</span>
+      </div>
+    </nav>
+
+    <main class="workspace">
+      <section id="panel-chat" class="panel active">
+        <header class="chat-header">
+          <div class="header-left">
+            <span class="material-symbols-outlined">smart_toy</span>
+            <h2>Chat</h2>
+          </div>
+          <button id="clear-chat" class="clear-btn">Clear Chat</button>
+        </header>
+
+        <div class="messages" id="chat-messages"></div>
+
+        <form class="composer" id="chat-form">
+          <div class="composer-row">
+            <textarea id="chat-input" placeholder="Describe what you want to build..." rows="1"></textarea>
+            <button type="submit" aria-label="Send message">
+              <span class="material-symbols-outlined">send</span>
+            </button>
+          </div>
+        </form>
+      </section>
+    </main>
+
+    <aside class="log">
+      <div class="log-title">Session log</div>
+      <div class="log-list" id="log-list"></div>
+      <button id="about-toggle" class="about-toggle" type="button">About Vux</button>
+    </aside>
+  </div>
+
+  <div id="about-modal" class="about-modal hidden">
+    <div class="about-card">
+      <button id="about-close" class="about-close" type="button" aria-label="Close">&times;</button>
+      <div class="about-brand">VUX AI</div>
+      <dl class="about-list">
+        <dt>Developer</dt><dd>Game Theory Building Studio</dd>
+        <dt>Owners</dt><dd>Muhammed Thariq P.S &amp; Gokul S Nair</dd>
+        <dt>AI Engineers</dt><dd>Muhammed Thariq P.S &amp; Gokul S Nair</dd>
+      </dl>
+    </div>
+  </div>
+
+  <script src="/app.js"></script>
+</body>
+</html>

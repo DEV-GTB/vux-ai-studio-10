@@ -1,0 +1,16 @@
+{"id":"js-null-safety","language":"javascript","pass":false,"failures":["HTTP 502: Vux AI Studio had trouble generating a response — please try again."],"durationMs":10682}
+{"id":"ts-no-any","language":"typescript","pass":false,"failures":["HTTP 502: Vux AI Studio had trouble generating a response — please try again."],"durationMs":46864}
+{"id":"react-effect-deps","language":"react","pass":false,"failures":["expected action \"edit\" but got \"answer\"","expected filename \"src/Search.jsx\" but got \"undefined\""],"action":"answer","durationMs":44357}
+{"id":"python-missing-key","language":"python","pass":false,"failures":["HTTP 502: Vux AI Studio had trouble generating a response — please try again."],"durationMs":47573}
+{"id":"java-try-with-resources","language":"java","pass":true,"failures":[],"action":"edit","durationMs":30431}
+{"id":"c-check-malloc","language":"c","pass":true,"failures":[],"action":"edit","durationMs":13440}
+{"id":"cpp-vector","language":"cpp","pass":false,"failures":["HTTP 502: Vux AI Studio had trouble generating a response — please try again."],"durationMs":48029}
+{"id":"csharp-no-result","language":"csharp","pass":false,"failures":["HTTP 502: Vux AI Studio had trouble generating a response — please try again."],"durationMs":47581}
+{"id":"go-handle-error","language":"go","pass":true,"failures":[],"action":"edit","durationMs":34753}
+{"id":"rust-no-unwrap","language":"rust","pass":false,"failures":["HTTP 502: Vux AI Studio had trouble generating a response — please try again."],"durationMs":48012}
+{"id":"sql-parameterised","language":"sql","pass":true,"failures":[],"action":"edit","durationMs":9453}
+{"id":"html-label","language":"html","pass":false,"failures":["HTTP 502: Vux AI Studio had trouble generating a response — please try again."],"durationMs":13939}
+{"id":"css-reduced-motion","language":"css","pass":false,"failures":["HTTP 502: Vux AI Studio had trouble generating a response — please try again."],"durationMs":2944}
+{"id":"shell-strict-mode","language":"shell","pass":false,"failures":["HTTP 502: Vux AI Studio had trouble generating a response — please try again."],"durationMs":26794}
+{"id":"create-new-file","language":"javascript","pass":false,"failures":["HTTP 502: Vux AI Studio had trouble generating a response — please try again."],"durationMs":47126}
+{"id":"explain-request","language":"javascript","pass":false,"failures":["HTTP 502: Vux AI Studio had trouble generating a response — please try again."],"durationMs":37631}

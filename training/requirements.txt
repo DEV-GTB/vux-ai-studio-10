@@ -1,0 +1,9 @@
+transformers
+datasets
+trl
+peft
+accelerate
+safetensors
+sentencepiece
+huggingface_hub
+pyyaml

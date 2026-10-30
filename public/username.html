@@ -1,0 +1,75 @@
+<!DOCTYPE html>
+<html lang="en" class="dark">
+<head>
+  <meta charset="utf-8" />
+  <meta name="viewport" content="width=device-width, initial-scale=1.0" />
+  <title>VUX AI - Sign up</title>
+  <script src="https://cdn.tailwindcss.com?plugins=forms,container-queries"></script>
+  <link href="https://fonts.googleapis.com/css2?family=Inter:wght@400;600;700&family=JetBrains+Mono:wght@500&display=swap" rel="stylesheet" />
+  <link href="https://fonts.googleapis.com/css2?family=Material+Symbols+Outlined:wght,FILL@100..700,0..1&display=swap" rel="stylesheet" />
+  <script>
+    tailwind.config = {
+      darkMode: 'class',
+      theme: {
+        extend: {
+          colors: {
+            background: '#0b1326',
+            surface: '#111b2d',
+            'surface-variant': '#1d2a40',
+            'surface-container-low': '#111b2d',
+            primary: '#4cd7f6',
+            'primary-container': '#06b6d4',
+            'on-primary': '#001f26',
+            'on-surface': '#eaf4ff',
+            'on-surface-variant': '#bfd0e5',
+            outline: '#32466a'
+          }
+        }
+      }
+    };
+  </script>
+  <style>
+    body { background: radial-gradient(circle at top, rgba(76, 215, 246, 0.16), transparent 30%), #0b1326; }
+    .option-btn.active { border-color: rgba(76, 215, 246, 0.75); background: rgba(76, 215, 246, 0.12); }
+  </style>
+</head>
+<body class="min-h-screen flex items-center justify-center px-4 py-10 text-on-surface">
+  <div class="w-full max-w-xl rounded-3xl border border-white/10 bg-surface/80 shadow-[0_0_40px_rgba(76,215,246,0.15)] backdrop-blur-xl p-6 md:p-8">
+    <div class="mb-6 text-center">
+      <div class="inline-flex items-center gap-2 rounded-full border border-primary/30 bg-primary/10 px-3 py-1 text-[10px] font-semibold uppercase tracking-[0.2em] text-primary">
+        <span class="material-symbols-outlined text-[12px]">bolt</span>
+        VUX AI
+      </div>
+      <h1 class="mt-5 text-3xl font-bold tracking-tight text-white">Before we continue, what should we call you?</h1>
+    </div>
+
+    <form id="username-form" class="space-y-6">
+      <div>
+        <label for="username-input" class="mb-2 block text-sm text-on-surface-variant">Username</label>
+        <input id="username-input" type="text" required placeholder="Enter your username" class="w-full rounded-xl border border-white/10 bg-background/60 px-4 py-3 text-base text-white placeholder:text-on-surface-variant/60 focus:border-primary focus:outline-none focus:ring-2 focus:ring-primary/20" />
+      </div>
+
+      <div>
+        <label class="mb-2 block text-sm text-on-surface-variant">Project vibe</label>
+        <div class="grid grid-cols-3 gap-3">
+          <button type="button" class="option-btn active rounded-xl border border-white/10 bg-white/5 px-3 py-3 text-sm font-medium text-on-surface-variant transition hover:border-primary/40" data-vibe="Fast launch">
+            Fast launch
+          </button>
+          <button type="button" class="option-btn rounded-xl border border-white/10 bg-white/5 px-3 py-3 text-sm font-medium text-on-surface-variant transition hover:border-primary/40" data-vibe="Builder mode">
+            Builder mode
+          </button>
+          <button type="button" class="option-btn rounded-xl border border-white/10 bg-white/5 px-3 py-3 text-sm font-medium text-on-surface-variant transition hover:border-primary/40" data-vibe="Creative flow">
+            Creative flow
+          </button>
+        </div>
+      </div>
+
+      <button type="submit" class="w-full rounded-xl bg-primary px-4 py-3 text-sm font-bold uppercase tracking-[0.18em] text-on-primary transition hover:brightness-110">
+        Continue
+      </button>
+    </form>
+  </div>
+
+  <script src="/username.js"></script>
+</body>
+</html>

@@ -1,0 +1,12 @@
+<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 48 48" width="48" height="48">
+  <defs>
+    <linearGradient id="vuxFaviconGradient" x1="4" y1="4" x2="44" y2="44" gradientUnits="userSpaceOnUse">
+      <stop offset="0" stop-color="#4cd7f6"/>
+      <stop offset="0.55" stop-color="#06b6d4"/>
+      <stop offset="1" stop-color="#e89337"/>
+    </linearGradient>
+  </defs>
+  <rect x="2" y="2" width="44" height="44" rx="13" fill="url(#vuxFaviconGradient)"/>
+  <path d="M12 14 L24 34 L36 14" fill="none" stroke="#052430" stroke-width="6" stroke-linecap="round" stroke-linejoin="round"/>
+  <circle cx="36" cy="14" r="3.2" fill="#052430"/>
+</svg>

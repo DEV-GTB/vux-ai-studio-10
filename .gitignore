@@ -1,0 +1,30 @@
+# Local-only files that must never be committed or pushed to the GitHub repo.
+
+# Private AI model & credential inventory (contains provider model lists and variable names).
+MODELS.md
+
+# Local environment files hold private keys.
+.env
+.env.*
+
+# Dependencies and build output.
+node_modules/
+dist/
+dist-ssr/
+
+# Local runtime data.
+data/
+uploads/
+tmp/
+logs/
+*.log
+
+# OS/editor noise.
+.DS_Store
+.vscode/*
+.idea/
+*.suo
+*.ntvs*
+*.njsproj
+*.sln
+*.sw?
