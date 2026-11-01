@@ -91,12 +91,8 @@ await check('image', '/api/image', { prompt: 'A simple blue square on white' }, 
   return null;
 });
 
-// The free image source needs no credential, so it is the last resort when
-// every configured provider is out of quota.
-await check('free image', 'https://image.pollinations.ai/prompt/a%20small%20blue%20cube?width=256&height=256&nologo=true', null, (response) => {
-  if (!response.ok) return `HTTP ${response.status}`;
-  return null;
-});
+// The free sources are no longer part of the image chain. The /api/image
+// check above already proves the unified image chain answers.
 
 await check('music', '/api/music', { prompt: 'A short calm loop' }, (response, payload) => {
   if (response.status !== 200) return `HTTP ${response.status}: ${payload?.error}`;

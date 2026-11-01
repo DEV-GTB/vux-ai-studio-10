@@ -164,16 +164,20 @@ shows which models are in play.
 | `lib/llama-whisper.js` | Groq | Qwen 3.8, Llama 3.3/3.4, GPT-OSS, Whisper-large-v3-turbo, PlayAI TTS |
 | `lib/flux-sdxl.js` | fal.ai | FLUX.1 Schnell, FLUX.1 Pro Kontext, SDXL, Kling Video, Stable Audio, PlayHT TTS, Wizper |
 | `lib/bge-m3-flux.js` | Hugging Face | Gemma 4 12B, DeepSeek-V3.2, FLUX.1 Krea Dev, BGE-M3, Qwen2.5-VL 7B |
-| `lib/pollinations.js` | free image and speech, no credential | FLUX, Piper, Kokoro |
+| `lib/pollinations.js` | free speech only, no credential | Piper, Kokoro |
 | `lib/hunyuan3d-2.js` | Hugging Face Space | Hunyuan3D-2, TRELLIS |
 
 Two rules decide the order:
 
 1. **A service that answers fast goes first.** A late answer is worth
    nothing to the person waiting.
-2. **A service that needs no credential goes last** for image and speech.
-   It is the safety net that catches the request when every other provider
-   is out of quota.
+2. **A service that needs no credential goes last** for speech. It is the
+   safety net that catches the request when every other provider is out of
+   quota.
+
+Image generation has no free fallback any more. It runs on the configured
+Cloudflare quality models first and the paid fallbacks after, and the render
+carries the prompt with no branding, watermark, or badge.
 
 A provider without a credential is skipped, not attempted. A provider that
 is refused for a billing reason says so plainly, because "User is locked.

@@ -267,8 +267,9 @@ test('Gemini retries with its fallback model after a transient Gemma error', asy
   const response = await ask([{ role: 'user', content: 'What is a closure?' }]);
   assert.equal(response.status, 200);
   assert.equal((await response.json()).text, 'Fallback answer.');
-  assert.match(requestedUrls[0], /models\/gemma-4-31b-it:/);
-  assert.match(requestedUrls[1], /models\/gemini-3.6-flash:/);
+  const geminiUrls = requestedUrls.filter((url) => url.includes('generativelanguage'));
+  assert.match(geminiUrls[0], /models\/gemma-4-31b-it:/);
+  assert.match(geminiUrls[1], /models\/gemini-3.6-flash:/);
 });
 
 test('Gemini falls back after both Hugging Face routes fail for coding requests', async () => {

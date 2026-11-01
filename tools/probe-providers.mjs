@@ -59,8 +59,9 @@ row('fal', 'text, image, video, music, speech', Boolean(getFalApiKey()), null, g
 // Hugging Face.
 row('Hugging Face', 'text, image, embeddings', Boolean(getHuggingFaceToken()), null, getHuggingFaceToken() ? 'configured' : 'no key');
 
-// Pollinations needs nothing.
-row('Pollinations', 'image, speech out', true, null, 'no credential required');
+// Pollinations is no longer an image source. It only serves speech, so the
+// status row describes it as a speech provider.
+row('Pollinations', 'speech out', true, null, 'no credential required');
 
 // Cartesia.
 row('Cartesia', 'speech out', Boolean(process.env.CARTESIA_API_KEY), null, process.env.CARTESIA_API_KEY ? 'configured' : 'no key');
@@ -101,12 +102,15 @@ if (getFalApiKey()) {
 }
 
 try {
-  const response = await fetch('https://image.pollinations.ai/prompt/a%20blue%20cube?width=256&height=256&nologo=true');
-  const buffer = Buffer.from(await response.arrayBuffer());
-  if (response.ok && buffer.length) console.log(`  [OK   ] free image service: ${buffer.length} bytes`);
-  else console.log(`  [FAIL ] free image service: HTTP ${response.status}`);
+  const { runCloudflareModel, getModelList } = await import('../lib/cloudflare.js');
+  const imageModels = getModelList('image');
+  const primaryImageModel = imageModels[0];
+  if (primaryImageModel) {
+    const response = await runCloudflareModel(primaryImageModel, { prompt: 'a blue cube' }, getCloudflareAccounts()[0]);
+    console.log(`  [OK   ] cloudflare image generation: ${String(response).length}`);
+  }
 } catch (error) {
-  console.log(`  [FAIL ] free image service: ${error.message.slice(0, 120)}`);
+  console.log(`  [FAIL ] cloudflare image generation: ${error.message.slice(0, 120)}`);
 }
 
 if (getHuggingFaceToken()) {

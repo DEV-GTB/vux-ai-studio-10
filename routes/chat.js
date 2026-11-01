@@ -7,6 +7,9 @@ import { callGroq, getGroqChatModel } from '../lib/llama-whisper.js';
 import { INDIA_KNOWLEDGE_PROMPT } from '../lib/knowledge.js';
 import { searchKnowledge } from '../lib/knowledgeStore.js';
 import { buildMemoryContext } from '../lib/memory.js';
+import { STUDIO_TOOL_GUIDANCE } from '../lib/promptBuilder.js';
+import { buildLiveContext } from '../lib/liveContext.js';
+import { looksLikeSearchRequest, webSearch } from '../lib/webSearch.js';
 
 const router = Router();
 
@@ -121,7 +124,7 @@ function addUserInstruction(content, instruction) {
   return parts;
 }
 
-function buildMessages(messages, extraKnowledge = '', extraMemory = '') {
+function buildMessages(messages, extraKnowledge = '', extraMemory = '', liveContext = '') {
   const normalizedMessages = messages.map((m) => {
     if (m.role !== 'user') {
       return {
@@ -146,7 +149,7 @@ function buildMessages(messages, extraKnowledge = '', extraMemory = '') {
     : '';
 
   return [
-    { role: 'system', content: `${IDENTITY_PROMPT}\n\n${FORCE_ENGLISH_INSTRUCTIONS}\n\n${INDIA_KNOWLEDGE_PROMPT}${extraKnowledge ? `\n\nRETRIEVED KNOWLEDGE (cite when used; verify time-sensitive facts):\n${extraKnowledge}` : ''}${memoryBlock}` },
+    { role: 'system', content: `${IDENTITY_PROMPT}\n\n${FORCE_ENGLISH_INSTRUCTIONS}\n\n${INDIA_KNOWLEDGE_PROMPT}${extraKnowledge ? `\n\nRETRIEVED KNOWLEDGE (cite when used; verify time-sensitive facts):\n${extraKnowledge}` : ''}${memoryBlock}${liveContext ? `\n\n${liveContext}` : ''}${STUDIO_TOOL_GUIDANCE ? `\n\n${STUDIO_TOOL_GUIDANCE}` : ''}` },
     ...normalizedMessages,
   ];
 }
@@ -372,7 +375,7 @@ router.post('/', async (req, res) => {
       : '';
   const retrieved = latestUserText ? searchKnowledge(latestUserText, 5) : [];
   const extraKnowledge = retrieved
-    .map((r) => `- [${r.source}/${r.category}] ${String(r.text || '').replace(/\s+/g, ' ').slice(0, 600)}`)
+    .map((r) => '- [' + String(r.source || '') + '/' + String(r.category || '') + '] ' + String(r.text || '').trim().slice(0, 600))
     .join('\n');
   // What the user asked Vux to remember is saved and recalled here. A failure
   // here must never take the chat down with it.
@@ -382,9 +385,42 @@ router.post('/', async (req, res) => {
   } catch (error) {
     console.warn('[chat] memory pass failed:', error?.message || error);
   }
-  const normalizedMessages = buildMessages(messages, extraKnowledge, memoryContext);
+  // Live context and the web search tool keep answers current without a slow
+  // provider round trip per question. Both are best effort: a failure here must
+  // never take the chat down, the provider answer still goes out.
   const latestUserMessage = [...identityMessages].reverse().find((message) => message.role === 'user');
-  const isCoding = looksLikeCodingRequest(latestUserMessage?.content || '');
+  const isCodingEarly = looksLikeCodingRequest(latestUserMessage?.content || '');
+  const latestUserHasImage = Array.isArray(latestUserMessage?.content)
+    && latestUserMessage.content.some((part) => part?.type === 'image_url');
+  const wantsLiveContext = Boolean(latestUserText)
+    && !isCodingEarly
+    && !latestUserHasImage
+    && !looksLikeImageRequest(latestUserText)
+    && !looksLikeImageEditRequest(latestUserText);
+  let liveContext = '';
+  if (wantsLiveContext) {
+    try {
+      liveContext = await buildLiveContext(latestUserText);
+    } catch (error) {
+      console.warn('[chat] live context pass failed:', error?.message || error);
+    }
+  }
+  let webKnowledge = '';
+  if (wantsLiveContext && looksLikeSearchRequest(latestUserText)) {
+    try {
+      const search = await webSearch(latestUserText, { maxResults: 5 });
+      const results = Array.isArray(search?.results) ? search.results : [];
+      if (results.length) {
+        const webResultLines = results.map((result) => '- ' + String(result.title || 'Untitled') + ' - ' + String(result.url || '')).join('\n');
+        webKnowledge = '\n\nWEB SEARCH RESULTS (cite sources, verify before answering):\n' + webResultLines;
+      }
+    } catch (error) {
+      console.warn('[chat] web search pass failed:', error?.message || error);
+    }
+  }
+  const contextBlock = [liveContext, webKnowledge].filter(Boolean).join('\n\n');
+  const normalizedMessages = buildMessages(messages, extraKnowledge, memoryContext, contextBlock);
+  const isCoding = isCodingEarly;
 
   const hasImageAttachment = normalizedMessages.some((message) => Array.isArray(message.content)
     && message.content.some((part) => part?.type === 'image_url'));

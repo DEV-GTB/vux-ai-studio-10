@@ -117,7 +117,7 @@ test('image requests use the Cloudflare text-to-image model on the primary accou
     assert.match(response.headers.get('content-type') || '', /^image\//);
     assert.ok(data.byteLength > 0, 'the image route must return image bytes');
     assert.equal(requests.length, 1);
-    assert.ok(requests[0].url.includes('/accounts/0ebc445b416bb5124ee647c04f432868/ai/run/@cf/leonardo/phoenix-1.0'));
+    assert.ok(requests[0].url.includes('/accounts/0ebc445b416bb5124ee647c04f432868/ai/run/black-forest-labs/flux-3-image-klein'));
     assert.match(requests[0].body.prompt, /a cat in space/);
   } finally {
     globalThis.fetch = originalFetch;

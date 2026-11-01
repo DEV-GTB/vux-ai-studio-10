@@ -22,7 +22,16 @@ function getDimensions(aspectRatio) {
 }
 
 // Builds the request body a model expects. Each image model family has its
-// own shape, so the body is built per model.
+// own shape, so the body is built per model. The newer Cloudflare Workers AI
+// image models accept an explicit resolution instruction, which is what makes
+// a render detailed instead of guessing from the prompt alone.
+const RESOLUTION_IMAGE_MODELS = new Set([
+  'black-forest-labs/flux-3-image-klein',
+  'klingai/kling-v3-image',
+  'topaz/gigapixel-standard-2',
+  'google/nano-banana-2.1',
+]);
+
 function buildCloudflareImageRequest(modelName, input) {
   if (input.reference) {
     if (modelName === 'krea/krea-3') {
@@ -46,10 +55,14 @@ function buildCloudflareImageRequest(modelName, input) {
     return { prompt: input.instruction || input.prompt };
   }
 
-  return {
+  const body = {
     prompt: input.prompt,
     steps: input.steps,
   };
+  if (RESOLUTION_IMAGE_MODELS.has(modelName) && input.resolution) {
+    body.resolution = input.resolution;
+  }
+  return body;
 }
 
 function getInferenceSteps(quality) {
@@ -73,15 +86,6 @@ function buildQualityPrompt(prompt, resolution = '1k') {
   const qualityLine = QUALITY_PROMPTS[key] || QUALITY_PROMPTS['1k'];
   const base = String(prompt || '').trim();
   return base ? `${base}, ${qualityLine}` : qualityLine;
-}
-
-async function generatePollinationsImage(prompt, width, height) {
-  const url = `https://image.pollinations.ai/prompt/${encodeURIComponent(prompt)}?width=${width}&height=${height}&model=flux&nologo=true&safe=true`;
-  const response = await fetch(url);
-  if (!response.ok) throw new Error(`Pollinations returned HTTP ${response.status}`);
-  const contentType = response.headers.get('content-type') || 'image/jpeg';
-  if (!contentType.startsWith('image/')) throw new Error('Pollinations did not return an image.');
-  return { buffer: Buffer.from(await response.arrayBuffer()), mimeType: contentType };
 }
 
 async function generateGeminiImage(prompt) {
@@ -123,9 +127,9 @@ router.post('/', async (req, res) => {
   const hasGemini = Boolean(process.env.GEMINI_API_KEY && process.env.GEMINI_API_KEY !== 'your_gemini_api_key_here');
   const cloudflareAccounts = getCloudflareAccounts(true);
   const hasCloudflare = cloudflareAccounts.length > 0;
-  // The free image source needs no credential, so image generation is
-  // always available. The unified layer reports a failure if every provider
-  // refuses the request.
+  // Image generation is served by the configured Cloudflare quality models
+  // first, then the paid fallbacks. The unified layer reports a failure only
+  // when every provider refuses the request.
 
   try {
     const { width, height } = getDimensions(aspectRatio);
