@@ -14,6 +14,8 @@ import imageRouter from './routes/image.js';
 import object3dRouter from './routes/3d.js';
 import musicRouter from './routes/music.js';
 import memoryRouter from './routes/memory.js';
+import newsRouter from './routes/news.js';
+import weatherRouter from './routes/weather.js';
 import terminalRouter from './routes/terminal.js';
 import projectRouter from './routes/project.js';
 import workspaceRouter from './routes/workspace.js';
@@ -71,9 +73,12 @@ const apiLimiter = rateLimit({
   legacyHeaders: false,
   skip: (req) => {
     const path = req.originalUrl.split('?')[0];
-    return path === '/api/v1/iot/esp32/status' ||
+    const freeLivePath = path === '/api/v1/iot/esp32/status' ||
       path === '/api/device/state' ||
-      path.startsWith('/api/device/');
+      path.startsWith('/api/device/') ||
+      path === '/api/news' ||
+      path === '/api/weather';
+    return freeLivePath;
   },
   message: { error: 'VUX AI is getting a lot of requests from you — please slow down.' },
 });
@@ -116,6 +121,8 @@ app.use('/api/image', imageRouter);
 app.use('/api/3d', object3dRouter);
 app.use('/api/music', musicRouter);
 app.use('/api/memory', memoryRouter);
+app.use('/api/news', newsRouter);
+app.use('/api/weather', weatherRouter);
 app.use('/api/training', trainingRouter);
 app.use('/api/knowledge', knowledgeRouter);app.use('/api/terminal', terminalRouter);
 app.use('/api/project', projectRouter);
